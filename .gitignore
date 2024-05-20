@@ -1,2 +1,5 @@
 /.idea
 /chess-in-5d
+**/__pycache__
+__pycache__
+terminatorzero.egg-info
