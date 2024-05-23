@@ -168,13 +168,15 @@ class Present:
 
     def get_board(self, dim_idx) -> Board|None:
         if dim_idx > 0:
+            dim_idx = dim_idx - 1
             if dim_idx < len(self.up_list):
                 return self.up_list[dim_idx]
             else:
                 return None
         elif dim_idx < 0:
-            if -dim_idx < len(self.down_list):
-                return self.down_list[-dim_idx]
+            dim_idx = -dim_idx - 1
+            if dim_idx < len(self.down_list):
+                return self.down_list[dim_idx]
             else:
                 return None
         else:
@@ -182,9 +184,9 @@ class Present:
 
     def add_board(self, dim_idx, board):
         if dim_idx > 0:
-            dim_idx, listt = dim_idx, self.up_list
+            dim_idx, listt = dim_idx - 1, self.up_list
         elif dim_idx < 0:
-            dim_idx, listt = -dim_idx, self.down_list
+            dim_idx, listt = -dim_idx - 1, self.down_list
         else:
             self.board = board
             return
@@ -198,6 +200,26 @@ class Present:
         """
         return (-len(self.down_list), len(self.up_list))
 
+    def is_empty(self):
+        return self.board is None and (self.get_range() == (0, 0))
+
+    def in_range(self, dim):
+        bot, top = self.get_range()
+        return bot <= dim and dim <= top
+
+    def remove_board(self, dim):
+        if self.in_range(dim):
+            if dim > 0:
+                self.up_list[dim - 1] = None
+                while self.up_list and self.up_list[-1] is None:
+                    self.up_list.pop()
+            elif dim < 0:
+                self.down_list[-dim - 1] = None
+                while self.down_list and self.down_list[-1] is None:
+                    self.down_list.pop()
+            else:
+                self.board = None
+
     def __str__(self):
         s = ''
         board_list = self.down_list[::-1] + [self.board] + self.up_list
@@ -210,7 +232,7 @@ class Present:
         return s
 
 
-class Game:
+class Chess5d:
     def __init__(self, present_list=None, first_player=0):
         if present_list is None:
             present_list = [Present(board=Board())]
@@ -218,6 +240,8 @@ class Game:
         self.first_player = first_player
         self.overall_range = None
         self._set_overall_range()
+        self.move_history = []
+        self.dimension_spawn_history = dict()
 
     def _set_overall_range(self):
         overall_range = [0, 0]
@@ -243,11 +267,16 @@ class Game:
 
         this will edit the game state to remove the piece at idx, move it to end_idx
         """
-        # if end_idx not in list(self.piece_possible_moves(idx)):
-        #    print("WARNING INVALID MOVE:", idx, '->', end_idx)
+        if end_idx not in list(self.piece_possible_moves(idx)):
+            print("WARNING INVALID MOVE:", idx, '->', end_idx)
+        move = (idx, end_idx)
+        self.move_history.append(move)
+
         time1, dim1, i1, j1 = idx
-        old_board = self.present_list[time1].get_board(dim1)
+        old_board = self.get_board((time1, dim1))
         new_board, piece = old_board.remove_piece((i1, j1))
+        if piece == EMPTY:
+            print("WARNING: no piece on square")
         piece = get_moved_piece(piece, idx, end_idx)
         time2, dim2, i2, j2 = end_idx
         if (time1, dim1) == (time2, dim2):
@@ -267,17 +296,58 @@ class Game:
                         new_board, capture = new_board.remove_piece((i1, j2))
 
             new_board.depassant(just_moved=end_idx[2:])
-            self.add_board_child((time2, dim2), new_board)
+            self.add_board_child((time2, dim2), new_board, move=move)
             return capture
         else:
             # this is the timeline that piece left behind
             new_board.depassant(just_moved=None)  # there are no just moved pawns
-            self.add_board_child((time1, dim1), new_board)
+            self.add_board_child((time1, dim1), new_board, move=move)
             newer_board, capture = self.get_board((time2, dim2)).add_piece(piece, (i2, j2))
             newer_board.depassant(
                 just_moved=None)  # even if this is a pawn, enpassant is not possible with timespace jumps
-            self.add_board_child((time2, dim2), newer_board)
+            self.add_board_child((time2, dim2), newer_board, move=move)
             return capture
+
+    def dimension_made_by(self, td_idx, move):
+        return self.dimension_spawn_history[(td_idx, move)]
+
+    def undo_move(self, move=None):
+        """
+        undos specified move, last move by default
+        """
+        if move is None:
+            if self.move_history:
+                move = self.move_history[-1]
+            else:
+                print('WARNING: no moves to undo')
+                return
+
+        def remove_board(td_idx):
+            time, dim = td_idx
+            self.present_list[time].remove_board(dim)
+            if self.present_list[time].is_empty():
+                self.present_list.pop(time)
+
+        idx, end_idx = move
+        if move not in self.move_history:
+            print("ERROR move", idx, '->', end_idx, 'never was made')
+            return
+        if move != self.move_history[-1]:
+            print("WARNING: move", idx, '->', end_idx, 'was not the last move made')
+        time1, dim1, i1, j1 = idx
+        time2, dim2, i2, j2 = end_idx
+
+        # no matter what, a new board is created when the piece moves from the board at (time1, dim1)
+        dim = self.dimension_made_by((time1, dim1), move)
+        remove_board((time1 + 1, dim))  # should be right after time1
+
+        if (time1, dim1) != (time2, dim2):
+            # if there is a  time dimension jump, another board is created
+            dim = self.dimension_made_by((time2, dim2), move)
+            remove_board((time2 + 1, dim))  # should be right after time2
+
+        self._set_overall_range()
+        self.move_history.remove(move)
 
     def get_board(self, td_idx):
         time, dim = td_idx
@@ -299,24 +369,21 @@ class Game:
         if time >= len(self.present_list) or time < 0:
             return False
         else:
-            board = self.present_list[time].get_board(dim)
+            board = self.get_board((time, dim))
             return not (board is None)
 
-    def add_board_child(self, td_idx, board):
+    def add_board_child(self, td_idx, board, move):
         """
         adds board as a child to the board specified by td_idx
         :param td_idx: (time, dimension)
         :param board: board to add
+        :param move: move that created this board (for undo purposes)
         """
         time, dim = td_idx
 
         if not self.idx_exists((time + 1, dim)):
-            if len(self.present_list) <= time + 1:
-                gift = Present()
-                gift.add_board(dim, board)
-                self.present_list.append(gift)
-            else:
-                self.present_list[time + 1].add_board(dim, board)
+            # in this case dimension does not change
+            new_dim = dim
         else:
             player = self.player(time=time)
             if player == 0:  # white move
@@ -326,7 +393,14 @@ class Game:
                 new_dim = self.overall_range[1] + 1
                 self.overall_range[1] += 1
 
+        if len(self.present_list) <= time + 1:
+            gift = Present()
+            gift.add_board(new_dim, board)
+            self.present_list.append(gift)
+        else:
             self.present_list[time + 1].add_board(new_dim, board)
+
+        self.dimension_spawn_history[(td_idx, move)] = new_dim
 
     def board_can_be_moved(self, td_idx):
         """
@@ -367,7 +441,7 @@ class Game:
         :return: iterable of idx candidates
         """
         idx_time, idx_dim, idx_i, idx_j = idx
-        piece = self.present_list[idx_time].get_board(idx_dim).get_piece((idx_i, idx_j))
+        piece = self.get_board((idx_time, idx_dim)).get_piece((idx_i, idx_j))
         pid = piece_id(piece)
         q_k_dims = itertools.chain(*[itertools.combinations(range(4), k) for k in range(1, 5)])
 
@@ -451,11 +525,14 @@ class Game:
                             if works:
                                 yield (idx_time, idx_dim, idx_i, idx_j + 2*dir)
 
-    def all_possible_moves(self, player):
+    def all_possible_moves(self, player=None):
         """
         returns an iterable of all possible moves of the specified player
+        if player is None, uses the first player that needs to move
         None is included if the player does not NEED to move
         """
+        if player is None:
+            player = self.player()
         if self.player() != player:
             yield None
         for idx in self.pieces_that_can_move(player=player):
@@ -510,57 +587,91 @@ class Game:
         return s
 
 
-game = Game()
-print('present', game.present())
-print('capture', game.make_move((0, 0, 1, 3), (0, 0, 3, 3)))
-print()
-print('present', game.present())
-print('capture', game.make_move((1, 0, 6, 4), (1, 0, 4, 4)))
-print()
-print('present', game.present())
-print('capture', game.make_move((2, 0, 0, 1), (0, 0, 2, 1)))
-print()
-print('present', game.present())
-print('capture', game.make_move((1, -1, 6, 6), (1, -1, 5, 6)))
-print()
-print('present', game.present())
-print('capture', game.make_move((2, -1, 1, 7), (2, -1, 2, 7)))
-print()
-print('present', game.present())
-print('capture', game.make_move((3, 0, 6, 6), (3, -1, 6, 6)))
-print()
-print('present', game.present())
-print('capture', game.make_move((4, -1, 2, 1), (4, 0, 4, 1)))
-print()
-print('present', game.present())
-print('capture', game.make_move((5, 0, 4, 4), (5, -1, 4, 4)))
-print()
-print('present', game.present())
-print('capture', game.make_move((6, 0, 4, 1), (6, -1, 4, 3)))
-print()
-print('present', game.present())
-print('capture', game.make_move((7, -1, 7, 1), (7, 0, 5, 1)))
-print()
-print('present', game.present())
-print('capture', game.make_move((8, -1, 0, 1), (8, 0, 2, 1)))
-print()
-print('present', game.present())
-print('capture', game.make_move((9, 0, 5, 1), (9, -1, 7, 1)))
-print()
-print('present', game.present())
-print('capture', game.make_move((10, 0, 2, 1), (10, -1, 0, 1)))
-print()
-print('game:')
-print(game)
+class Chess2d(Chess5d):
+    def __init__(self):
+        super().__init__()
 
-all_moves = list(game.all_possible_moves(1))
-old_init = None
-for move in all_moves:
-    if move is None:
-        print(move)
-        continue
-    idx, end_idx = move
-    if idx != old_init:
-        print()
-        old_init = idx
-    print(piece_id(game.get_piece(idx)),idx,'->',end_idx)
+    def piece_possible_moves(self, idx):
+        # only return moves that do not jump time-dimensions
+        for end_idx in super().piece_possible_moves(idx):
+            if end_idx[:2] == idx[:2]:
+                yield end_idx
+
+    def make_move(self, idx, end_idx):
+        """
+        only need i,j coords
+        :param idx: (i,j)
+        :param end_idx: (i,j)
+        """
+        if len(idx) == 4:
+            return super().make_move(idx, end_idx)
+        else:
+            time = len(self.present_list) - 1
+            dim = 0
+            return super().make_move((time, dim) + tuple(idx), (time, dim) + tuple(end_idx))
+
+    def play(self):
+        while True:
+            pass
+
+
+if __name__ == '__main__':
+    game = Chess5d()
+    print('present', game.present())
+    print('capture', game.make_move((0, 0, 1, 3), (0, 0, 3, 3)))
+    print()
+    print('present', game.present())
+    print('capture', game.make_move((1, 0, 6, 4), (1, 0, 4, 4)))
+    print()
+    print('present', game.present())
+    print('capture', game.make_move((2, 0, 0, 1), (0, 0, 2, 1)))
+    print()
+    print('present', game.present())
+    print('capture', game.make_move((1, -1, 6, 6), (1, -1, 5, 6)))
+    print()
+    print('present', game.present())
+    print('capture', game.make_move((2, -1, 1, 7), (2, -1, 2, 7)))
+    print()
+    print('present', game.present())
+    print('capture', game.make_move((3, 0, 6, 6), (3, -1, 6, 6)))
+    print()
+    print('present', game.present())
+    print('capture', game.make_move((4, -1, 2, 1), (4, 0, 4, 1)))
+    print()
+    print('present', game.present())
+    print('capture', game.make_move((5, 0, 4, 4), (5, -1, 4, 4)))
+    print()
+    print('present', game.present())
+    print('capture', game.make_move((6, 0, 4, 1), (6, -1, 4, 3)))
+    print()
+    print('present', game.present())
+    print('capture', game.make_move((7, -1, 7, 1), (7, 0, 5, 1)))
+    print()
+    print('present', game.present())
+    print('capture', game.make_move((8, -1, 0, 1), (8, 0, 2, 1)))
+    print()
+    print('present', game.present())
+    print('capture', game.make_move((9, 0, 5, 1), (9, -1, 7, 1)))
+    print()
+    print('present', game.present())
+    print('capture', game.make_move((10, 0, 2, 1), (10, -1, 0, 1)))
+    print()
+    print('game:')
+    print(game)
+    for _ in range(10):
+        game.undo_move()
+    print('game:')
+    print(game)
+
+    quit()
+    all_moves = list(game.all_possible_moves(1))
+    old_init = None
+    for move in all_moves:
+        if move is None:
+            print(move)
+            continue
+        idx, end_idx = move
+        if idx != old_init:
+            print()
+            old_init = idx
+        print(piece_id(game.get_piece(idx)), idx, '->', end_idx)
