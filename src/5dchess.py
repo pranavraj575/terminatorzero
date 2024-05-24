@@ -65,16 +65,26 @@ def en_passantable(piece):
 
 
 class Board:
-    def __init__(self, pieces=None):
+    def __init__(self, pieces=None, player=0):
+        self.player = player
         if pieces is None:
-            pieces = [[EMPTY for _ in range(8)] for _ in range(8)]
+            pieces = [[EMPTY for _ in range(BOARD_SIZE)] for _ in range(BOARD_SIZE)]
             for i, row in enumerate((
                     [ROOK + UNMOVED, KNIGHT, BISHOP, QUEEN, KING + UNMOVED, BISHOP, KNIGHT, ROOK + UNMOVED],
-                    [PAWN + UNMOVED for _ in range(8)]
+                    [PAWN + UNMOVED for _ in range(BOARD_SIZE)]
             )):
                 pieces[i] = [piece.upper() for piece in row]
                 pieces[len(pieces) - i - 1] = [piece.lower() for piece in row]
         self.board = pieces
+
+    def flipped_board(self):
+        return Board(pieces=[[as_player(piece, 1 - player_of(piece)) if piece is not EMPTY else EMPTY
+                              for piece in row]
+                             for row in self.board[::-1]],
+                     player=1 - self.player)
+
+    def set_player(self, player):
+        self.player = player
 
     def get_piece(self, idx):
         i, j = idx
@@ -128,13 +138,85 @@ class Board:
         """
         returns copy of self
         """
-        return Board(copy.deepcopy(self.board))
+        return Board(pieces=copy.deepcopy(self.board), player=self.player)
 
-    def is_attacked(self, player, idx):
+    def is_dangerous(self, player, idx):
+        store_self_player = self.player
+
+        opponent = 1 - player
+        self.player = opponent
+
+        temp_game = Chess2d(present_list=Present(board=self))
+        for (_, end_idx) in temp_game.all_possible_moves(player=opponent):
+            if end_idx[2:] == idx:
+                self.player = store_self_player
+                return True
+        self.player = store_self_player
         return False
 
-    def as_array(self):
-        pass
+    @staticmethod
+    def blocked_array():
+        encoded = np.zeros((BOARD_SIZE, BOARD_SIZE, 17))
+        encoded[:, :, 15] = 1
+        return encoded
+
+    def encoding(self):
+        encoded = np.zeros((BOARD_SIZE, BOARD_SIZE, 17))
+        encoder_dict = {ROOK: 0, KNIGHT: 1, BISHOP: 2, QUEEN: 3, KING: 4, PAWN: 5}
+
+        def piece_dimension(pid, player):
+            return encoder_dict[pid] + 6*player
+
+        kings_unmoved = [False, False]
+        left_rooks_unmoved = [False, False]
+        right_rooks_unmoved = [False, False]
+
+        for i in range(8):
+            for j in range(8):
+                encoded[i, j, 12] = self.player
+                if self.board[i][j] != EMPTY:
+                    piece = self.get_piece((i, j))
+                    pid = piece_id(piece)
+                    encoded[i, j, piece_dimension(pid, player_of(piece))] = 1
+
+                    encoded[i, j, 13] = is_unmoved(piece)
+                    encoded[i, j, 14] = en_passantable(piece)
+
+                    # if pid == KING and is_unmoved(piece):
+                    #    kings_unmoved[player_of(piece)] = True
+
+                    # if pid == ROOK and is_unmoved(piece):
+                    #    if j == 0:
+                    #        left_rooks_unmoved[player_of(piece)] = True
+                    #    else:
+                    #        right_rooks_unmoved[player_of(piece)] = True
+
+        # kings_unmoved[0] and left_rooks_unmoved[0]
+        # kings_unmoved[0] and right_rooks_unmoved[0]
+
+        # kings_unmoved[1] and left_rooks_unmoved[1]
+        # kings_unmoved[1] and right_rooks_unmoved[1]
+        return encoded
+
+    @staticmethod
+    def decoding(encoding):
+        piece_order = [ROOK, KNIGHT, BISHOP, QUEEN, KING, PAWN]
+
+        pieces = [[EMPTY for _ in range(BOARD_SIZE)] for _ in range(BOARD_SIZE)]
+        for i in range(BOARD_SIZE):
+            for j in range(BOARD_SIZE):
+                piece = None
+                for k in range(12):
+                    if int(encoding[i, j, k]) == 1:
+                        player = k//6
+                        pid = piece_id(piece_order[k%6])
+                        piece = as_player(pid, player)
+                        if encoding[i, j, 13]:
+                            piece += UNMOVED
+                        if encoding[i, j, 14]:
+                            piece += PASSANTABLE
+                pieces[i][j] = piece
+        return Board(pieces=pieces, player=int(encoding[0, 0, 12]))
 
     def __str__(self):
         s = ''
@@ -150,8 +232,8 @@ class Board:
     @staticmethod
     def empty_string():
         s = ''
-        for row in range(16):
-            s += ' '*17
+        for row in range(2*BOARD_SIZE):
+            s += ' '*(2*BOARD_SIZE + 1)
             s += '\n'
         return s
 
@@ -165,6 +247,13 @@ class Present:
             down_list = []
         self.up_list = up_list
         self.down_list = down_list
+
+    def flip_present(self):
+        if self.board is not None:
+            self.board = self.board.flipped_board()
+        self.up_list, self.down_list = (
+            [board.flipped_board() if board is not None else None for board in self.down_list],
+            [board.flipped_board() if board is not None else None for board in self.up_list])
 
     def get_board(self, dim_idx) -> Board|None:
         if dim_idx > 0:
@@ -226,7 +315,7 @@ class Present:
         str_boards = [Board.empty_string() if board is None else board.__str__()
                       for board in board_list]
         str_boards = [s.split('\n') for s in str_boards]
-        for row in range(16):
+        for row in range(2*BOARD_SIZE):
             s += '\t'.join([str_board[row] for str_board in str_boards])
             s += '\n'
         return s
@@ -235,13 +324,30 @@ class Present:
 class Chess5d:
     def __init__(self, present_list=None, first_player=0):
         if present_list is None:
-            present_list = [Present(board=Board())]
+            present_list = [
+                Present(board=
+                        Board(player=first_player)
+                        )
+            ]
         self.present_list = present_list
         self.first_player = first_player
         self.overall_range = None
         self._set_overall_range()
         self.move_history = []
         self.dimension_spawn_history = dict()
+
+    def _flip_move(self, move):
+        ((time1, dim1, i1, j1), (time2, dim2, i2, j2)) = move
+        return ((time1, -dim1, BOARD_SIZE - 1 - i1, j1), (time2, -dim2, BOARD_SIZE - 1 - i2, j2))
+
+    def flip_game(self):
+        self.first_player = 1 - self.first_player
+        for present in self.present_list:
+            present.flip_present()
+        self.move_history = [self._flip_move(move) for move in self.move_history]
+        self.dimension_spawn_history = {((time_idx, -dim_idx), self._flip_move(move)): -dim
+                                        for ((time_idx, dim_idx), move), dim in self.dimension_spawn_history.items()}
+        self._set_overall_range()
 
     def _set_overall_range(self):
         overall_range = [0, 0]
@@ -301,10 +407,12 @@ class Chess5d:
         else:
             # this is the timeline that piece left behind
             new_board.depassant(just_moved=None)  # there are no just moved pawns
+
             self.add_board_child((time1, dim1), new_board, move=move)
             newer_board, capture = self.get_board((time2, dim2)).add_piece(piece, (i2, j2))
-            newer_board.depassant(
-                just_moved=None)  # even if this is a pawn, enpassant is not possible with timespace jumps
+
+            # even if this is a pawn, enpassant is not possible with timespace jumps
+            newer_board.depassant(just_moved=None)
             self.add_board_child((time2, dim2), newer_board, move=move)
             return capture
 
@@ -380,6 +488,8 @@ class Chess5d:
         :param move: move that created this board (for undo purposes)
         """
         time, dim = td_idx
+        new_player = 1 - self.player(time=time)  # other players move on the added board
+        board.set_player(new_player)
 
         if not self.idx_exists((time + 1, dim)):
             # in this case dimension does not change
@@ -518,7 +628,7 @@ class Chess5d:
                             works = True
                             for k in range(1, 3):
                                 idx_temp = (idx_time, idx_dim, rook_i, idx_j + dir*k)
-                                if self.is_attacked(player_of(piece), idx_temp):
+                                if self.is_dangerous(player_of(piece), idx_temp):
                                     works = False
                                 if player_of(self.get_piece(idx_temp)) is not None:
                                     works = False
@@ -539,9 +649,14 @@ class Chess5d:
             for end_idx in self.piece_possible_moves(idx):
                 yield (idx, end_idx)
 
-    def is_attacked(self, player, idx):
+    def is_dangerous(self, player, idx):
+        """
+        returns if a square is dangerous for a player
+
+        since this is implemented weirdly in the game, we will just return if there is a threat on the same board
+        """
         board = self.get_board(idx[:2])
-        board.is_attacked(player, idx[2:])
+        board.is_dangerous(player, idx[2:])
 
     def player(self, time=None):
         """
@@ -579,7 +694,7 @@ class Chess5d:
 
             s += 'time ' + str(t) + ':\n'
 
-            for row in range(16):
+            for row in range(2*BOARD_SIZE):
                 s += '\t'.join([str_board[row] for str_board in str_boards])
                 s += '\n'
 
@@ -588,8 +703,8 @@ class Chess5d:
 
 
 class Chess2d(Chess5d):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, present_list=None, first_player=0):
+        super().__init__(present_list=present_list, first_player=first_player)
 
     def piece_possible_moves(self, idx):
         # only return moves that do not jump time-dimensions
@@ -612,7 +727,27 @@ class Chess2d(Chess5d):
 
     def play(self):
         while True:
-            pass
+            print(self.present_list[-1].board)
+            moves = list(self.all_possible_moves())
+            starters = list(set(idx for idx, _ in moves))
+
+            for i, starter in enumerate(starters):
+                print(i, ':', piece_id(self.get_piece(starter)), starter[2:])
+            choice = ''
+            while not choice.isnumeric() or int(choice) < 0 or int(choice) >= len(starters):
+                choice = input('type which piece to move: ')
+            starter = starters[int(choice)]
+            finishers = list(set(end_idx for idx, end_idx in moves if idx == starter))
+
+            for i, finisher in enumerate(finishers):
+                print(i, ':', finisher[2:])
+            choice = ''
+            while not choice.isnumeric() or int(choice) < 0 or int(choice) >= len(finishers):
+                choice = input('type where to move it: ')
+            finisher = finishers[int(choice)]
+            captuer = self.make_move(starter, finisher)
+            if piece_id(captuer) == KING:
+                break
 
 
 if __name__ == '__main__':
@@ -656,8 +791,6 @@ if __name__ == '__main__':
     print('present', game.present())
     print('capture', game.make_move((10, 0, 2, 1), (10, -1, 0, 1)))
     print()
-    print('game:')
-    print(game)
     for _ in range(10):
         game.undo_move()
     print('game:')
