@@ -30,7 +30,6 @@ class ConvBlock(nn.Module):
                                         padding=padding)
         self.bn1 = nn.BatchNorm1d(output_channels)
         self.relu1 = nn.ReLU()
-        self.update_store = None
 
     def forward(self, X):
         """
@@ -50,17 +49,6 @@ class ConvBlock(nn.Module):
         for module in (self.conv1, self.bn1):
             for param in module.parameters():
                 yield param
-
-    def all_params(self):
-        return [torch.clone(thing) for thing in (self.bn1.bias, self.bn1.weight, list(self.conv1.parameters())[0])]
-
-    def was_updated(self):
-        if self.update_store is None:
-            self.update_store = self.all_params()
-            return True
-        updated = all(torch.any(a != b) for a, b in zip(self.all_params(), self.update_store))
-        self.update_store = self.all_params()
-        return updated
 
 
 class ResBlock(nn.Module):
@@ -103,7 +91,6 @@ class ResBlock(nn.Module):
                                         )
         self.bn2 = nn.BatchNorm1d(num_channels)
         self.relu2 = nn.ReLU()
-        self.update_store = None
 
     def forward(self, X):
         """
@@ -139,23 +126,6 @@ class ResBlock(nn.Module):
             for param in module.parameters():
                 yield param
 
-    def all_params(self):
-        return [torch.clone(thing) for thing in (self.bn1.bias,
-                                                 self.bn1.weight,
-                                                 list(self.conv1.parameters())[0],
-                                                 self.bn2.bias,
-                                                 self.bn2.weight,
-                                                 list(self.conv2.parameters())[0],
-                                                 )]
-
-    def was_updated(self):
-        if self.update_store is None:
-            self.update_store = self.all_params()
-            return True
-        updated = all(torch.any(a != b) for a, b in zip(self.all_params(), self.update_store))
-        self.update_store = self.all_params()
-        return updated
-
 
 class CNNArchitect(nn.Module):
     def __init__(self,
@@ -185,7 +155,6 @@ class CNNArchitect(nn.Module):
         self.perm = CisToTransPerm()
         self.collapse = Collapse(embedding_dim=embedding_dim, hidden_layers=collapse_hidden_layers)
         self.output = FFN(input_dim=embedding_dim, output_dim=2, hidden_layers=output_hidden_layers)
-        self.update_store = None
 
     def forward(self, X):
         # (batch size, embedding dim, D1, D2, ...)
@@ -207,43 +176,27 @@ class CNNArchitect(nn.Module):
             for param in module.parameters():
                 yield param
 
-    def all_params(self):
-        params = self.enc.all_params()
-        for layer in self.layers:
-            params += layer.all_params()
-        params += [torch.clone(thing) for thing in self.collapse.parameters()]
-        params += [torch.clone(thing) for thing in self.output.parameters()]
-        return [torch.clone(thing) for thing in params]
-
-    def was_updated(self):
-        if self.update_store is None:
-            self.update_store = self.all_params()
-            return True
-        updated = all(torch.any(a != b) for a, b in zip(self.all_params(), self.update_store))
-        self.update_store = self.all_params()
-        return updated
-
 
 if __name__ == '__main__':
 
     game = Chess5d()
 
-    game.make_move((0, 0, 1, 3), (0, 0, 3, 3))
-    game.make_move((1, 0, 6, 4), (1, 0, 4, 4))
-    game.make_move((2, 0, 0, 1), (0, 0, 2, 1))
-    game.make_move((1, -1, 6, 6), (1, -1, 5, 6))
-    game.make_move((2, -1, 1, 7), (2, -1, 2, 7))
-    game.make_move((3, 0, 6, 6), (3, -1, 6, 6))
-    game.make_move((4, -1, 2, 1), (4, 0, 4, 1))
-    game.make_move((5, 0, 4, 4), (5, -1, 4, 4))
-    game.make_move((6, 0, 4, 1), (6, -1, 4, 3))
-    game.make_move((7, -1, 7, 1), (7, 0, 5, 1))
-    game.make_move((8, -1, 0, 1), (8, 0, 2, 1))
-    game.make_move((9, 0, 5, 1), (9, -1, 7, 1))
-    game.make_move((10, 0, 2, 1), (10, -1, 0, 1))
-    game.make_move((11, 0, 7, 3), (11, 0, 3, 7))
-    game.make_move((11, -1, 7, 1), (11, -1, 5, 2))
-    game.make_move((12, -1, 4, 3), (8, -1, 4, 2))
+    game.make_move(((0, 0, 1, 3), (0, 0, 3, 3)))
+    game.make_move(((1, 0, 6, 4), (1, 0, 4, 4)))
+    game.make_move(((2, 0, 0, 1), (0, 0, 2, 1)))
+    game.make_move(((1, -1, 6, 6), (1, -1, 5, 6)))
+    game.make_move(((2, -1, 1, 7), (2, -1, 2, 7)))
+    game.make_move(((3, 0, 6, 6), (3, -1, 6, 6)))
+    game.make_move(((4, -1, 2, 1), (4, 0, 4, 1)))
+    game.make_move(((5, 0, 4, 4), (5, -1, 4, 4)))
+    game.make_move(((6, 0, 4, 1), (6, -1, 4, 3)))
+    game.make_move(((7, -1, 7, 1), (7, 0, 5, 1)))
+    game.make_move(((8, -1, 0, 1), (8, 0, 2, 1)))
+    game.make_move(((9, 0, 5, 1), (9, -1, 7, 1)))
+    game.make_move(((10, 0, 2, 1), (10, -1, 0, 1)))
+    game.make_move(((11, 0, 7, 3), (11, 0, 3, 7)))
+    game.make_move(((11, -1, 7, 1), (11, -1, 5, 2)))
+    game.make_move(((12, -1, 4, 3), (8, -1, 4, 2)))
 
     encoding = torch.tensor(game.encoding(), dtype=torch.float).unsqueeze(0)
 

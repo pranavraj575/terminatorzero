@@ -147,7 +147,7 @@ class Board:
         opponent = 1 - player
         self.player = opponent
 
-        temp_game = Chess2d(present_list=Present(board=self))
+        temp_game = Chess2d(board=self)
         for (_, end_idx) in temp_game.all_possible_moves(player=opponent):
             if end_idx[2:] == idx:
                 self.player = store_self_player
@@ -383,20 +383,20 @@ class Chess5d:
     def dim_is_active(self, dim):
         return abs(dim) <= self.get_active_number()
 
-    def make_move(self, idx, end_idx):
+    def make_move(self, move):
         """
         moves piece at idx to end idx
-
-        :param idx: (time, dimension, x, y), must be on an existing board
-        :param end_idx: (time, dimension, x, y), must be to an existing board, and
-
+        :param move = (idx, end_idx)
+            idx: (time, dimension, x, y), must be on an existing board
+            end_idx: (time, dimension, x, y), must be to an existing board, and
         this will edit the game state to remove the piece at idx, move it to end_idx
         """
+
+        idx, end_idx = move
         if end_idx not in list(self.piece_possible_moves(idx)):
             print("WARNING INVALID MOVE:", idx, '->', end_idx)
         if not self.board_can_be_moved(idx[:2]):
             print("WARNING MOVE MADE ON INVALID BOARD:", idx[:2])
-        move = (idx, end_idx)
         self.move_history.append(move)
 
         time1, dim1, i1, j1 = idx
@@ -509,14 +509,14 @@ class Chess5d:
         :param move: move that created this board (for undo purposes)
         """
         time, dim = td_idx
-        new_player = 1 - self.player(time=time)  # other players move on the added board
+        new_player = 1 - self.player_at(time=time)  # other players move on the added board
         board.set_player(new_player)
 
         if not self.idx_exists((time + 1, dim)):
             # in this case dimension does not change
             new_dim = dim
         else:
-            player = self.player(time=time)
+            player = self.player_at(time=time)
             if player == 0:  # white move
                 new_dim = self.overall_range[0] - 1
                 self.overall_range[0] -= 1
@@ -561,7 +561,7 @@ class Chess5d:
         :return iterable (time, dimension, i, j)
         """
         for (t, d) in self.boards_with_possible_moves():
-            if self.player(time=t) == player:
+            if self.player_at(time=t) == player:
                 board = self.get_board((t, d))
                 for (i, j) in board.pieces_of(player):
                     yield (t, d, i, j)
@@ -611,7 +611,7 @@ class Chess5d:
                             player_of(piece) != player_of(self.get_piece(pos))):
                         yield tuple(pos)
         if pid == PAWN:
-            player = self.player(idx_time)
+            player = self.player_at(time=idx_time)
             dir = -2*player + 1
             # forward moves
             for dim in (2, 1):
@@ -664,8 +664,9 @@ class Chess5d:
         None is included if the player does not NEED to move
         """
         if player is None:
-            player = self.player()
-        if self.player() != player:
+            player = self.player_at(time=self.present())
+        if self.player_at(time=self.present()) != player:
+            # the player does not have to move
             yield None
         for idx in self.pieces_that_can_move(player=player):
             for end_idx in self.piece_possible_moves(idx):
@@ -712,7 +713,7 @@ class Chess5d:
         board = self.get_board(idx[:2])
         board.is_dangerous(player, idx[2:])
 
-    def player(self, time=None):
+    def player_at(self, time=None):
         """
         returns which players turn it is
             if a player does not NEED to move, it is not their turn
@@ -789,7 +790,7 @@ class Chess5d:
                 if board is not None:
                     gift.add_board(dim_idx, board)
             game.present_list.append(gift)
-        game.first_player = game.get_board((0, 0)).player
+        game.player = game.get_board((0, 0)).player
         game._set_overall_range()
         return game
 
@@ -832,18 +833,21 @@ class Chess2d(Chess5d):
             if end_idx[:2] == idx[:2]:
                 yield end_idx
 
-    def make_move(self, idx, end_idx):
+    def make_move(self, move):
         """
         only need i,j coords
-        :param idx: (i,j)
-        :param end_idx: (i,j)
+        :param move: (idx, end_idx)
+            idx: (i,j)
+            end_idx: (i,j)
         """
+        idx, end_idx = move
         if len(idx) == 4:
-            return super().make_move(idx, end_idx)
+            return super().make_move(move)
         else:
             time = len(self.present_list) - 1
             dim = 0
-            return super().make_move((time, dim) + tuple(idx), (time, dim) + tuple(end_idx))
+            real_move = ((time, dim) + tuple(idx), (time, dim) + tuple(end_idx))
+            return super().make_move(real_move)
 
     def play(self):
         while True:
@@ -865,7 +869,7 @@ class Chess2d(Chess5d):
             while not choice.isnumeric() or int(choice) < 0 or int(choice) >= len(finishers):
                 choice = input('type where to move it: ')
             finisher = finishers[int(choice)]
-            captuer = self.make_move(starter, finisher)
+            captuer = self.make_move((starter, finisher))
             if piece_id(captuer) == KING:
                 break
 
@@ -888,52 +892,52 @@ class Chess2d(Chess5d):
 if __name__ == '__main__':
     game = Chess5d()
     print('present', game.present())
-    print('capture', game.make_move((0, 0, 1, 3), (0, 0, 3, 3)))
+    print('capture', game.make_move(((0, 0, 1, 3), (0, 0, 3, 3))))
     print()
     print('present', game.present())
-    print('capture', game.make_move((1, 0, 6, 4), (1, 0, 4, 4)))
+    print('capture', game.make_move(((1, 0, 6, 4), (1, 0, 4, 4))))
     print()
     print('present', game.present())
-    print('capture', game.make_move((2, 0, 0, 1), (0, 0, 2, 1)))
+    print('capture', game.make_move(((2, 0, 0, 1), (0, 0, 2, 1))))
     print()
     print('present', game.present())
-    print('capture', game.make_move((1, -1, 6, 6), (1, -1, 5, 6)))
+    print('capture', game.make_move(((1, -1, 6, 6), (1, -1, 5, 6))))
     print()
     print('present', game.present())
-    print('capture', game.make_move((2, -1, 1, 7), (2, -1, 2, 7)))
+    print('capture', game.make_move(((2, -1, 1, 7), (2, -1, 2, 7))))
     print()
     print('present', game.present())
-    print('capture', game.make_move((3, 0, 6, 6), (3, -1, 6, 6)))
+    print('capture', game.make_move(((3, 0, 6, 6), (3, -1, 6, 6))))
     print()
     print('present', game.present())
-    print('capture', game.make_move((4, -1, 2, 1), (4, 0, 4, 1)))
+    print('capture', game.make_move(((4, -1, 2, 1), (4, 0, 4, 1))))
     print()
     print('present', game.present())
-    print('capture', game.make_move((5, 0, 4, 4), (5, -1, 4, 4)))
+    print('capture', game.make_move(((5, 0, 4, 4), (5, -1, 4, 4))))
     print()
     print('present', game.present())
-    print('capture', game.make_move((6, 0, 4, 1), (6, -1, 4, 3)))
+    print('capture', game.make_move(((6, 0, 4, 1), (6, -1, 4, 3))))
     print()
     print('present', game.present())
-    print('capture', game.make_move((7, -1, 7, 1), (7, 0, 5, 1)))
+    print('capture', game.make_move(((7, -1, 7, 1), (7, 0, 5, 1))))
     print()
     print('present', game.present())
-    print('capture', game.make_move((8, -1, 0, 1), (8, 0, 2, 1)))
+    print('capture', game.make_move(((8, -1, 0, 1), (8, 0, 2, 1))))
     print()
     print('present', game.present())
-    print('capture', game.make_move((9, 0, 5, 1), (9, -1, 7, 1)))
+    print('capture', game.make_move(((9, 0, 5, 1), (9, -1, 7, 1))))
     print()
     print('present', game.present())
-    print('capture', game.make_move((10, 0, 2, 1), (10, -1, 0, 1)))
+    print('capture', game.make_move(((10, 0, 2, 1), (10, -1, 0, 1))))
     print()
     print('present', game.present())
-    print('capture', game.make_move((11, 0, 7, 3), (11, 0, 3, 7)))
+    print('capture', game.make_move(((11, 0, 7, 3), (11, 0, 3, 7))))
     print()
     print('present', game.present())
-    print('capture', game.make_move((11, -1, 7, 1), (11, -1, 5, 2)))
+    print('capture', game.make_move(((11, -1, 7, 1), (11, -1, 5, 2))))
     print()
     print('present', game.present())
-    print('capture', game.make_move((12, -1, 4, 3), (8, -1, 4, 2)))
+    print('capture', game.make_move(((12, -1, 4, 3), (8, -1, 4, 2))))
     print()
     # for _ in range(10):
     #    game.undo_move()

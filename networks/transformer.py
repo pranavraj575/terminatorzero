@@ -1,8 +1,12 @@
+import itertools
 import torch
 from torch import nn
+
 from src.chess5d import Chess5d
 from networks.ffn import FFN
 from networks.permute import CisToTransPerm
+from networks.collapse import Collapse
+
 
 class PositionalEncodingLayer(nn.Module):
 
@@ -308,64 +312,109 @@ class DecoderBlock(nn.Module):
         return self.norm3(_X + self.dropout3(X))
 
 
+class TransformerArchitect(nn.Module):
+    def __init__(self,
+                 initial_channels,
+                 embedding_dim,
+                 num_decoders,
+                 n_heads,
+                 positional_encoding_nums=None,
+                 drop_prob=.2,
+                 decoder_hidden_layers=None,
+                 collapse_hidden_layers=None,
+                 output_hidden_layers=None,
+                 ):
+        """
+        pastes a bunch of transformers together and produces a vector in R^2 (eval for white and eval for black)
+
+        data is of shape (batch size, initial channels, D1, ...)
+
+        num decoders is the number of decoder blocks to use
+        decoder_hidden_layers is the hidden layers to use in the NN at the end of each decoder
+        drop_prob is the dropout to use in each decoder
+        num_heads is the number of attention heads
+
+        embedding dimension is used by all decoders
+        positional encoding nums is the number of positional encodings to use on each dimension
+            default is (8,8,3,3)
+
+        collapse_hidden_layers and output_hidden_layers are used in collapse and output respectively
+            default collapse is just a linear connection
+            default output is [4*embedding_layer]
+        """
+        super().__init__()
+        if positional_encoding_nums is None:
+            positional_encoding_nums = (8, 8, 3, 3)
+        if output_hidden_layers is None:
+            output_hidden_layers = [4*embedding_dim]
+
+        self.emb = InitialEmbedding(initial_channels=initial_channels,
+                                    embedding_dim=embedding_dim,
+                                    positional_encoding_nums=positional_encoding_nums)
+
+        self.blocks = nn.ModuleList([
+            DecoderBlock(embedding_dim=embedding_dim,
+                         n_heads=n_heads,
+                         drop_prob=drop_prob,
+                         hidden_layers=decoder_hidden_layers)
+            for _ in range(num_decoders)
+        ])
+        self.collapse = Collapse(embedding_dim=embedding_dim, hidden_layers=collapse_hidden_layers)
+        self.output = FFN(input_dim=embedding_dim, output_dim=2, hidden_layers=output_hidden_layers)
+
+    def forward(self, X):
+        # (batch size, D1, D2, ..., embedding dim)
+        X = self.emb(X)
+        for block in self.blocks:
+            X = block(X)
+
+        # (batch size, embedding_dim)
+        X = self.collapse(X)
+
+        # (batch size, 2)
+        return self.output(X)
+
+
 if __name__ == '__main__':
     import time as timothy
 
     game = Chess5d()
 
-    game.make_move((0, 0, 1, 3), (0, 0, 3, 3))
-    game.make_move((1, 0, 6, 4), (1, 0, 4, 4))
-    game.make_move((2, 0, 0, 1), (0, 0, 2, 1))
-    game.make_move((1, -1, 6, 6), (1, -1, 5, 6))
-    game.make_move((2, -1, 1, 7), (2, -1, 2, 7))
-    game.make_move((3, 0, 6, 6), (3, -1, 6, 6))
-    game.make_move((4, -1, 2, 1), (4, 0, 4, 1))
-    game.make_move((5, 0, 4, 4), (5, -1, 4, 4))
-    game.make_move((6, 0, 4, 1), (6, -1, 4, 3))
-    game.make_move((7, -1, 7, 1), (7, 0, 5, 1))
-    game.make_move((8, -1, 0, 1), (8, 0, 2, 1))
-    game.make_move((9, 0, 5, 1), (9, -1, 7, 1))
-    game.make_move((10, 0, 2, 1), (10, -1, 0, 1))
-    game.make_move((11, 0, 7, 3), (11, 0, 3, 7))
-    game.make_move((11, -1, 7, 1), (11, -1, 5, 2))
-    game.make_move((12, -1, 4, 3), (8, -1, 4, 2))
+    game.make_move(((0, 0, 1, 3), (0, 0, 3, 3)))
+    game.make_move(((1, 0, 6, 4), (1, 0, 4, 4)))
+    game.make_move(((2, 0, 0, 1), (0, 0, 2, 1)))
+    game.make_move(((1, -1, 6, 6), (1, -1, 5, 6)))
+    game.make_move(((2, -1, 1, 7), (2, -1, 2, 7)))
+    game.make_move(((3, 0, 6, 6), (3, -1, 6, 6)))
+    game.make_move(((4, -1, 2, 1), (4, 0, 4, 1)))
+    game.make_move(((5, 0, 4, 4), (5, -1, 4, 4)))
+    game.make_move(((6, 0, 4, 1), (6, -1, 4, 3)))
+    game.make_move(((7, -1, 7, 1), (7, 0, 5, 1)))
+    game.make_move(((8, -1, 0, 1), (8, 0, 2, 1)))
+    game.make_move(((9, 0, 5, 1), (9, -1, 7, 1)))
+    game.make_move(((10, 0, 2, 1), (10, -1, 0, 1)))
+    game.make_move(((11, 0, 7, 3), (11, 0, 3, 7)))
+    game.make_move(((11, -1, 7, 1), (11, -1, 5, 2)))
+    game.make_move(((12, -1, 4, 3), (8, -1, 4, 2)))
     for _ in range(10):
         game.undo_move()
-    old_encoding = torch.tensor(game.encoding(), dtype=torch.float).unsqueeze(0)
-    encoding = CisToTransPerm()(old_encoding)
+    encoding = torch.tensor(game.encoding(), dtype=torch.float).unsqueeze(0)
+    encoding = CisToTransPerm()(encoding)
 
-    pos = PositionalEncodingLayer([7, 7, 3, 3])
-    print(encoding.shape)
-    encoding = pos.forward(encoding)
-    print(encoding.shape)
-    att = MultiHeadedAttentionSingleMove(n_heads=2, in_dim=encoding.shape[-1], out_dim=17, cmp_dim=15)
+    net = TransformerArchitect(initial_channels=encoding.shape[1],
+                               embedding_dim=69,
+                               num_decoders=2,
+                               n_heads=3,
+                               )
 
-    dec = DecoderBlock(embedding_dim=encoding.shape[-1], n_heads=2)
-    from networks.collapse import Collapse
-
-    collapse = Collapse(embedding_dim=encoding.shape[-1], hidden_layers=[69])
-
-    import itertools
-
-    optim = torch.optim.Adam(params=itertools.chain(dec.parameters(), collapse.parameters()))
+    optim = torch.optim.Adam(params=net.parameters())
     start = timothy.time()
     for i in range(10):
         optim.zero_grad()
-        out = dec(target=encoding, encoded_source=encoding)
-        out = collapse(out)
+        out = net.forward(encoding)
         if i == 0:
             print(out.shape)
         loss = torch.nn.MSELoss()(out, torch.ones_like(out))
-        loss.backward()
-        optim.step()
-        if not (i + 1)%1:
-            print('time:', int(timothy.time() - start), 'loss:', loss)
-    quit()
-    optim = torch.optim.Adam(params=att.parameters())
-    for i in range(10):
-        optim.zero_grad()
-        output = att.forward(encoding, encoding, encoding)
-        loss = torch.nn.MSELoss()(output, torch.ones_like(output))
         loss.backward()
         optim.step()
         if not (i + 1)%1:
