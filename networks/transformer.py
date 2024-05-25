@@ -1,41 +1,8 @@
-import itertools
-
 import torch
 from torch import nn
 from src.chess5d import Chess5d
-
-
-class CisToTransPerm(nn.Module):
-    """
-    permutes from convolution order (batch size, channels, D1, D2, ...)
-    to transformer order (batch size, D1, D2, ..., channels)
-    """
-
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, X: torch.Tensor):
-        # assume X has k+1 dimensions (0, ...,k)
-        # this list is (0,2,3,...,k,1)
-        return X.permute(0, *range(2, len(X.shape)), 1)
-
-
-class TransToCisPerm(nn.Module):
-    """
-    permutes from transformer order (batch size, D1, D2, ..., channels)
-    to convolution order (batch size, channels, D1, D2, ...)
-    """
-
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, X):
-        k = len(X.shape) - 1
-        # assume X has k+1 dimensions (0, ..., k)
-        # this list is (0, k, 1, ..., k-1)
-
-        return X.permute(0, k, range(1, k))
-
+from networks.ffn import FFN
+from networks.permute import CisToTransPerm
 
 class PositionalEncodingLayer(nn.Module):
 
@@ -93,6 +60,31 @@ class PositionalEncodingLayer(nn.Module):
             # size (batch_size, D1, D2, ..., X.shape[-1]+2*num encodings)
 
         return X
+
+
+class InitialEmbedding(nn.Module):
+    """
+    initally embeds a chess board (batch size, initial channels, D1, ...)
+        into transformer format (batch size, D1, D2, ..., embedding dim)
+    """
+
+    def __init__(self, initial_channels, embedding_dim, positional_encoding_nums=None):
+        """
+        inital channels is the number of channels expected in the embedding
+        positional encoding nums are the number of encodings to use for each dimension
+            generally, using k encodings will distinguish a 2^k length sequence on that dimension
+            default is (8,8,3,3), as 2^3=8 and 2^8 is pretty big
+        """
+        super().__init__()
+        if positional_encoding_nums is None:
+            positional_encoding_nums = (8, 8, 3, 3)
+        self.perm = CisToTransPerm()
+        self.pos_enc = PositionalEncodingLayer(encoding_nums=positional_encoding_nums)
+        initial_embedding = initial_channels + self.pos_enc.additional_output()
+        self.linear = nn.Linear(initial_embedding, embedding_dim)
+
+    def forward(self, X):
+        return self.linear(self.pos_enc(self.perm(X)))
 
 
 class GeneralAttentionLayer(nn.Module):
@@ -266,7 +258,7 @@ class MultiHeadedAttentionFull(GeneralAttentionToMultiHead):
 
 
 class DecoderBlock(nn.Module):
-    def __init__(self, embedding_dim, n_heads, drop_prob=.2, hidden_layer_size=None):
+    def __init__(self, embedding_dim, n_heads, drop_prob=.2, hidden_layers=None):
         super(DecoderBlock, self).__init__()
 
         self.attention1 = MultiHeadedAttentionSingleMove(n_heads=n_heads,
@@ -279,12 +271,9 @@ class DecoderBlock(nn.Module):
         self.norm2 = nn.LayerNorm(embedding_dim)
         self.norm3 = nn.LayerNorm(embedding_dim)
 
-        if hidden_layer_size is None:
-            hidden_layer_size = 4*embedding_dim
-
-        self.linear1 = nn.Linear(embedding_dim, hidden_layer_size)
-        self.linear2 = nn.Linear(hidden_layer_size, embedding_dim)
-        self.relu = nn.ReLU()
+        if hidden_layers is None:
+            hidden_layers = [4*embedding_dim]
+        self.ffn = FFN(input_dim=embedding_dim, output_dim=embedding_dim, hidden_layers=hidden_layers)
 
         self.dropout1 = nn.Dropout(drop_prob)
         self.dropout2 = nn.Dropout(drop_prob)
@@ -312,63 +301,11 @@ class DecoderBlock(nn.Module):
             _X = X
             X = self.attention2(X, encoded_source, encoded_source)
             X = self.norm2(_X + self.dropout2(X))
+
         _X = X
-        X = self.linear1(X)
-        X = self.relu(X)
-        X = self.linear2(X)
+        X = self.ffn(X)
 
         return self.norm3(_X + self.dropout3(X))
-
-
-class Collapse(nn.Module):
-    """
-    collapses a sequence down to a single vector
-
-    learns a FFN to determine relevance of each element
-    """
-
-    def __init__(self, embedding_dim, hidden_layers=None):
-        """
-        if hideen layers is none, the FFN learned is a simple linear map
-        """
-        super().__init__()
-        if hidden_layers is None:
-            hidden_layers = []
-        self.nn_layers = nn.ModuleList()
-        hidden_layers = [embedding_dim] + hidden_layers
-        for i in range(len(hidden_layers) - 1):
-            self.nn_layers.append(nn.Linear(hidden_layers[i], hidden_layers[i + 1]))
-            self.nn_layers.append(nn.ReLU())
-        self.nn_layers.append(nn.Linear(hidden_layers[-1], 1))  # end at a scalar
-
-        self.softmax = nn.Softmax(-1)
-
-    def forward(self, X):
-        """
-        :param X: (batch size, *, embedding_dim)
-        :return: (batch size, embedding_dim)
-            for each element of the batch, should be a weighted average of all embeddings
-        """
-        (batch_size, *middle_dims, embedding_dim) = X.shape
-        _X = X
-        for layer in self.nn_layers:
-            X = layer(X)
-        # X is now (batch size, *, 1)
-
-        # (batch size, *)
-        X = X.view((batch_size, -1))
-        weights = self.softmax(X)
-
-        # (batch size, 1, *)
-        weights = weights.unsqueeze(1)
-
-        # (batch size, *, embedding_dim)
-        _X = _X.view((batch_size, -1, embedding_dim))
-
-        # (batch size, 1, embedding_dim)
-        output = torch.bmm(weights, _X)
-
-        return output.view((batch_size, embedding_dim))
 
 
 if __name__ == '__main__':
@@ -404,6 +341,8 @@ if __name__ == '__main__':
     att = MultiHeadedAttentionSingleMove(n_heads=2, in_dim=encoding.shape[-1], out_dim=17, cmp_dim=15)
 
     dec = DecoderBlock(embedding_dim=encoding.shape[-1], n_heads=2)
+    from networks.collapse import Collapse
+
     collapse = Collapse(embedding_dim=encoding.shape[-1], hidden_layers=[69])
 
     import itertools
