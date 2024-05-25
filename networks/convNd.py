@@ -1,5 +1,3 @@
-from typing import Iterator
-
 import torchConvNd
 import torch
 from torch import nn
@@ -24,11 +22,13 @@ class ConvBlock(nn.Module):
                                         padding=padding)
         self.bn1 = nn.BatchNorm1d(output_channels)
         self.relu = nn.ReLU()
-    def parameters(self, recurse: bool = True) -> Iterator[Parameter]:
+
+    def parameters(self, recurse: bool = True):
         for param in self.bn1.parameters():
             yield param
         for param in self.conv1.parameters():
             yield param
+
     def forward(self, X):
         """
         :param X: shaped (batch size, input channels, D1, D2, ...)
@@ -72,7 +72,7 @@ if __name__ == '__main__':
         loss = torch.nn.MSELoss()(output, torch.ones_like(output))
         loss.backward()
         optim.step()
-        if not (i+1)%10:
+        if not (i + 1)%10:
             print(loss)
 
     print(conv.forward(encoding).shape)

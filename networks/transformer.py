@@ -95,12 +95,9 @@ class PositionalEncodingLayer(nn.Module):
         return X
 
 
-class SelfAttentionLayerSingleMove(nn.Module):
+class GeneralAttentionLayer(nn.Module):
     """
-    self attention layer for 5d chess
-    since it is far too expensive to compute the attention of each square to every other square
-        (O(n^2) in number of squares)
-        we only compute the attention between squares that a chess piece can connect in one move
+    general self attention layer for 5d chess
     """
 
     def __init__(self, in_dim: int, out_dim: int, cmp_dim=None) -> None:
@@ -116,6 +113,69 @@ class SelfAttentionLayerSingleMove(nn.Module):
         self.in_dim = in_dim
         self.out_dim = out_dim
         self.cmp_dim = cmp_dim
+
+    def forward(self, query_X: torch.Tensor, key_X: torch.Tensor, value_X: torch.Tensor):
+        """
+        query_X, key_X and value_X have shape (batch_size, D1, D2, D3, D4, in_dim).
+
+        The dimensions (D1, D2, D3, D4) will probably all be the same
+
+        This will return an output of size (batch_size, D1, D2, D3, D4, out_dim)
+        """
+        raise NotImplementedError
+
+
+class SelfAttentionLayerFull(GeneralAttentionLayer):
+    """
+    self attention layer for 5d chess
+
+    attends all squares to all squares
+    """
+
+    def __init__(self, in_dim: int, out_dim: int, cmp_dim=None) -> None:
+        super().__init__(in_dim=in_dim, out_dim=out_dim, cmp_dim=cmp_dim)
+
+    def forward(self, query_X: torch.Tensor, key_X: torch.Tensor, value_X: torch.Tensor):
+        """
+        query_X, key_X and value_X have shape (batch_size, D1, D2, D3, D4, in_dim).
+
+        The dimensions (D1, D2, D3, D4) will probably all be the same
+
+        This will return an output of size (batch_size, D1, D2, D3, D4, out_dim)
+        """
+        # board_size=(D1, D2, D3, D4)
+        (batch_size, *board_size, in_dim) = query_X.shape
+
+        # query is (batch_size, D1', D2', D3', D4', comparision dim)
+        # key is (batch_size, D1, D2, D3, D4, comparision dim)
+        # value is (batch_size, D1, D2, D3, D4, out dim)
+        query, key, value = self.linear_Q(query_X), self.linear_K(key_X), self.linear_V(value_X)
+
+        # squish all the middle dimensions
+        # (batch_size, D1'*D2'*D3'*D4', comparision dim)
+        query = query.view((batch_size, -1, self.cmp_dim))
+        # (batch_size, D1*D2*D3*D4, comparision dim)
+        key = key.view((batch_size, -1, self.cmp_dim))
+        # (batch_size, D1*D2*D3*D4, out dim)
+        value = value.view((batch_size, -1, self.out_dim))
+
+        # (batch_size, D1'*D2'*D3'*D4', D1*D2*D3*D4)
+        soft_input = torch.bmm(query, key.transpose(1, 2))/(self.cmp_dim**.5)
+        att_weights = self.softmax(soft_input)
+
+        return torch.bmm(att_weights, value)
+
+
+class SelfAttentionLayerSingleMove(GeneralAttentionLayer):
+    """
+    self attention layer for 5d chess
+    since it is far too expensive to compute the attention of each square to every other square
+        (O(n^2) in number of squares)
+        we only compute the attention between squares that a chess piece can connect in one move
+    """
+
+    def __init__(self, in_dim: int, out_dim: int, cmp_dim=None) -> None:
+        super().__init__(in_dim=in_dim, out_dim=out_dim, cmp_dim=cmp_dim)
 
     def forward(self, query_X: torch.Tensor, key_X: torch.Tensor, value_X: torch.Tensor):
         """
@@ -162,13 +222,12 @@ class SelfAttentionLayerSingleMove(nn.Module):
         return output
 
 
-class MultiHeadedAttentionSingleMove(nn.Module):
-
-    def __init__(self, n_heads: int, in_dim: int, out_dim: int, cmp_dim=None):
+class GeneralAttentionToMultiHead(nn.Module):
+    def __init__(self, Attention: type[GeneralAttentionLayer], n_heads: int, in_dim: int, out_dim: int, cmp_dim=None):
         super().__init__()
 
         self.attention_heads = nn.ModuleList([
-            SelfAttentionLayerSingleMove(in_dim, out_dim, cmp_dim)
+            Attention(in_dim, out_dim, cmp_dim)
             for _ in range(n_heads)
         ])
 
@@ -194,6 +253,18 @@ class MultiHeadedAttentionSingleMove(nn.Module):
         return self.linear(outputs)
 
 
+class MultiHeadedAttentionSingleMove(GeneralAttentionToMultiHead):
+    def __init__(self, n_heads: int, in_dim: int, out_dim: int, cmp_dim=None):
+        super().__init__(Attention=SelfAttentionLayerSingleMove,
+                         n_heads=n_heads, in_dim=in_dim, out_dim=out_dim, cmp_dim=cmp_dim)
+
+
+class MultiHeadedAttentionFull(GeneralAttentionToMultiHead):
+    def __init__(self, n_heads: int, in_dim: int, out_dim: int, cmp_dim=None):
+        super().__init__(Attention=SelfAttentionLayerFull,
+                         n_heads=n_heads, in_dim=in_dim, out_dim=out_dim, cmp_dim=cmp_dim)
+
+
 class DecoderBlock(nn.Module):
     def __init__(self, embedding_dim, n_heads, drop_prob=.2, hidden_layer_size=None):
         super(DecoderBlock, self).__init__()
@@ -214,7 +285,6 @@ class DecoderBlock(nn.Module):
         self.linear1 = nn.Linear(embedding_dim, hidden_layer_size)
         self.linear2 = nn.Linear(hidden_layer_size, embedding_dim)
         self.relu = nn.ReLU()
-
 
         self.dropout1 = nn.Dropout(drop_prob)
         self.dropout2 = nn.Dropout(drop_prob)
@@ -250,6 +320,57 @@ class DecoderBlock(nn.Module):
         return self.norm3(_X + self.dropout3(X))
 
 
+class Collapse(nn.Module):
+    """
+    collapses a sequence down to a single vector
+
+    learns a FFN to determine relevance of each element
+    """
+
+    def __init__(self, embedding_dim, hidden_layers=None):
+        """
+        if hideen layers is none, the FFN learned is a simple linear map
+        """
+        super().__init__()
+        if hidden_layers is None:
+            hidden_layers = []
+        self.nn_layers = nn.ModuleList()
+        hidden_layers = [embedding_dim] + hidden_layers
+        for i in range(len(hidden_layers) - 1):
+            self.nn_layers.append(nn.Linear(hidden_layers[i], hidden_layers[i + 1]))
+            self.nn_layers.append(nn.ReLU())
+        self.nn_layers.append(nn.Linear(hidden_layers[-1], 1))  # end at a scalar
+
+        self.softmax = nn.Softmax(-1)
+
+    def forward(self, X):
+        """
+        :param X: (batch size, *, embedding_dim)
+        :return: (batch size, embedding_dim)
+            for each element of the batch, should be a weighted average of all embeddings
+        """
+        (batch_size, *middle_dims, embedding_dim) = X.shape
+        _X = X
+        for layer in self.nn_layers:
+            X = layer(X)
+        # X is now (batch size, *, 1)
+
+        # (batch size, *)
+        X = X.view((batch_size, -1))
+        weights = self.softmax(X)
+
+        # (batch size, 1, *)
+        weights = weights.unsqueeze(1)
+
+        # (batch size, *, embedding_dim)
+        _X = _X.view((batch_size, -1, embedding_dim))
+
+        # (batch size, 1, embedding_dim)
+        output = torch.bmm(weights, _X)
+
+        return output.view((batch_size, embedding_dim))
+
+
 if __name__ == '__main__':
     import time as timothy
 
@@ -282,18 +403,19 @@ if __name__ == '__main__':
     print(encoding.shape)
     att = MultiHeadedAttentionSingleMove(n_heads=2, in_dim=encoding.shape[-1], out_dim=17, cmp_dim=15)
 
-    #print(att.forward(encoding, encoding, encoding).shape)
-
     dec = DecoderBlock(embedding_dim=encoding.shape[-1], n_heads=2)
-    print(len(list(dec.parameters())))
-    print(dec.forward(encoding).shape)
-    out=encoding
+    collapse = Collapse(embedding_dim=encoding.shape[-1], hidden_layers=[69])
 
-    optim = torch.optim.Adam(params=dec.parameters())
+    import itertools
+
+    optim = torch.optim.Adam(params=itertools.chain(dec.parameters(), collapse.parameters()))
     start = timothy.time()
     for i in range(10):
         optim.zero_grad()
-        out = dec.forward(target=encoding,encoded_source=encoding)
+        out = dec(target=encoding, encoded_source=encoding)
+        out = collapse(out)
+        if i == 0:
+            print(out.shape)
         loss = torch.nn.MSELoss()(out, torch.ones_like(out))
         loss.backward()
         optim.step()
