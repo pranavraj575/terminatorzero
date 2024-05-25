@@ -12,6 +12,7 @@ EMPTY = ' '
 UNMOVED = '*'
 PASSANTABLE = '$'
 
+NUM_PIECES = 6
 BOARD_SIZE = 8
 
 
@@ -155,32 +156,43 @@ class Board:
         return False
 
     @staticmethod
-    def blocked_array():
-        encoded = np.zeros((BOARD_SIZE, BOARD_SIZE, 17))
-        encoded[:, :, 15] = 1
+    def encoding_shape():
+        return (2*NUM_PIECES + 4, BOARD_SIZE, BOARD_SIZE)
+
+    @staticmethod
+    def blocked_board_encoding():
+        encoded = np.zeros(Board.encoding_shape())
         return encoded
 
+    @staticmethod
+    def is_blocked(encoding):
+        return encoding[2*NUM_PIECES + 3, 0, 0] == 0
+
     def encoding(self):
-        encoded = np.zeros((BOARD_SIZE, BOARD_SIZE, 17))
+        encoded = np.zeros(Board.encoding_shape())
         encoder_dict = {ROOK: 0, KNIGHT: 1, BISHOP: 2, QUEEN: 3, KING: 4, PAWN: 5}
 
         def piece_dimension(pid, player):
-            return encoder_dict[pid] + 6*player
+            return encoder_dict[pid] + NUM_PIECES*player
 
         kings_unmoved = [False, False]
         left_rooks_unmoved = [False, False]
         right_rooks_unmoved = [False, False]
 
-        for i in range(8):
-            for j in range(8):
-                encoded[i, j, 12] = self.player
+        k_0 = 2*NUM_PIECES
+
+        encoded[k_0, :, :] = self.player
+        encoded[2*NUM_PIECES + 3, :, :] = 1  # unblocked board marker
+        for i in range(BOARD_SIZE):
+            for j in range(BOARD_SIZE):
+
                 if self.board[i][j] != EMPTY:
                     piece = self.get_piece((i, j))
                     pid = piece_id(piece)
-                    encoded[i, j, piece_dimension(pid, player_of(piece))] = 1
+                    encoded[piece_dimension(pid, player_of(piece)), i, j] = 1
 
-                    encoded[i, j, 13] = is_unmoved(piece)
-                    encoded[i, j, 14] = en_passantable(piece)
+                    encoded[k_0 + 1, i, j] = is_unmoved(piece)
+                    encoded[k_0 + 2, i, j] = en_passantable(piece)
 
                     # if pid == KING and is_unmoved(piece):
                     #    kings_unmoved[player_of(piece)] = True
@@ -202,21 +214,25 @@ class Board:
     def decoding(encoding):
         piece_order = [ROOK, KNIGHT, BISHOP, QUEEN, KING, PAWN]
 
+        if Board.is_blocked(encoding):
+            return None
+
         pieces = [[EMPTY for _ in range(BOARD_SIZE)] for _ in range(BOARD_SIZE)]
+        k_0 = 2*NUM_PIECES
         for i in range(BOARD_SIZE):
             for j in range(BOARD_SIZE):
-                piece = None
-                for k in range(12):
-                    if int(encoding[i, j, k]) == 1:
-                        player = k//6
-                        pid = piece_id(piece_order[k%6])
+                piece = EMPTY
+                for k in range(k_0):
+                    if int(encoding[k, i, j]) == 1:
+                        player = k//NUM_PIECES
+                        pid = piece_id(piece_order[k%NUM_PIECES])
                         piece = as_player(pid, player)
-                        if encoding[i, j, 13]:
+                        if encoding[k_0 + 1, i, j]:
                             piece += UNMOVED
-                        if encoding[i, j, 14]:
+                        if encoding[k_0 + 2, i, j]:
                             piece += PASSANTABLE
                 pieces[i][j] = piece
-        return Board(pieces=pieces, player=int(encoding[0, 0, 12]))
+        return Board(pieces=pieces, player=int(encoding[k_0, 0, 0]))
 
     def __str__(self):
         s = ''
@@ -364,6 +380,9 @@ class Chess5d:
         """
         return min(self.overall_range[1], -self.overall_range[0]) + 1
 
+    def dim_is_active(self, dim):
+        return abs(dim) <= self.get_active_number()
+
     def make_move(self, idx, end_idx):
         """
         moves piece at idx to end idx
@@ -375,6 +394,8 @@ class Chess5d:
         """
         if end_idx not in list(self.piece_possible_moves(idx)):
             print("WARNING INVALID MOVE:", idx, '->', end_idx)
+        if not self.board_can_be_moved(idx[:2]):
+            print("WARNING MOVE MADE ON INVALID BOARD:", idx[:2])
         move = (idx, end_idx)
         self.move_history.append(move)
 
@@ -517,8 +538,9 @@ class Chess5d:
         returns if the specified board can be moved from
         """
         time, dim = td_idx
-        # if the following board exixts, a move has been made, otherwise, no move was made
-        return not self.idx_exists((time + 1, dim))
+        # the board itself must exist
+        # if the next board exixts, a move has been made, otherwise, no move was made
+        return self.idx_exists((time, dim)) and (not self.idx_exists((time + 1, dim)))
 
     def boards_with_possible_moves(self):
         """
@@ -649,6 +671,38 @@ class Chess5d:
             for end_idx in self.piece_possible_moves(idx):
                 yield (idx, end_idx)
 
+    @staticmethod
+    def connections_of(idx, boardsize):
+        """
+        returns an iterable of all indices where a single chess piece can possibly connect to idx
+            additionally returns idx, as no move is a valid move for the purpose of this method
+
+        :param idx: an index with the caveat that the second dimension is always nonnegative
+        :param boardsize: (D1,D2,D3,D4), the max dimensions of the board (each starts at zero, even D2)
+        :return: iterable of indices (second dimension nonnegative)
+        """
+        yield idx
+        # normal piece moves
+        for dims in itertools.chain(*[itertools.combinations(range(4), k) for k in range(1, 5)]):
+            for signs in itertools.product((-1, 1), repeat=len(dims)):
+                vec = np.array((0, 0, 0, 0))
+                for k, dim in enumerate(dims):
+                    vec[dim] = signs[k]
+
+                pos = idx + vec
+                while np.all(pos >= 0) and np.all(pos < boardsize):
+                    yield tuple(pos)
+                    pos += vec
+        # knight moves
+        for dims in itertools.permutations(range(4), 2):
+            for signs in itertools.product((-1, 1), repeat=len(dims)):
+                vec = np.array((0, 0, 0, 0))
+                for k, dim in enumerate(dims):
+                    vec[dim] = signs[k]*(k + 1)
+                pos = idx + vec
+                if np.all(pos >= 0) and np.all(pos < boardsize):
+                    yield tuple(pos)
+
     def is_dangerous(self, player, idx):
         """
         returns if a square is dangerous for a player
@@ -676,8 +730,71 @@ class Chess5d:
         """
         returns the time index of the present
         """
-        active = self.get_active_number()
-        return min(t for (t, d) in self.boards_with_possible_moves() if abs(d) <= active)
+        return min(t for (t, d) in self.boards_with_possible_moves() if self.dim_is_active(d))
+
+    def encoding_shape(self):
+        dimensions = 1 + self.overall_range[1] - self.overall_range[0]
+        board_channels, I, J = Board.encoding_shape()
+        return (board_channels + 3, len(self.present_list), dimensions, I, J)
+
+    def encoding(self):
+        encoded = np.zeros(self.encoding_shape())
+        board_channels, I, J = Board.encoding_shape()
+        dimensions_used_by_players = np.sign(self.overall_range[1] + self.overall_range[0])
+        # if negative, white used more dimensions, if postive, black used more dimensions, 0 if equal
+        encoded[board_channels + 2, :, :, :, :] = dimensions_used_by_players
+        for time, present in enumerate(self.present_list):
+            for dim in range(self.overall_range[0], self.overall_range[1] + 1):
+                board = present.get_board(dim)
+
+                if board is None:
+                    board_encoding = Board.blocked_board_encoding()
+                else:
+                    board_encoding = board.encoding()
+                idx_of_dim = dim - self.overall_range[0]  # since these must start at 0
+                encoded[:board_channels, time, idx_of_dim, :, :] = board_encoding
+                encoded[board_channels, time, idx_of_dim, :, :] = self.board_can_be_moved((time, dim))
+                encoded[board_channels + 1, time, idx_of_dim, :, :] = self.dim_is_active(dim)
+
+        return encoded
+
+    @staticmethod
+    def decoding(array):
+        game = Chess5d(present_list=[])
+        _, times, dims, _, _ = array.shape
+        board_channels, _, _ = Board.encoding_shape()
+        dimensions_used_by_players = array[board_channels + 2, 0, 0, 0, 0]
+
+        active_range = [0, 0]
+        for dim in range(dims):
+            if array[board_channels + 1, 0, dim, 0, 0]:
+                active_range[0] = dim
+                break
+
+        for dim in range(dims):
+            if array[board_channels + 1, 0, dim, 0, 0]:
+                active_range[1] = dim
+        center_range = copy.deepcopy(active_range)
+        if dimensions_used_by_players == -1:
+            center_range[0] += 1
+        elif dimensions_used_by_players == 1:
+            center_range[1] -= 1
+        d_0 = sum(center_range)//2
+
+        for time in range(times):
+            gift = Present()
+            for dim in range(dims):
+                dim_idx = dim - d_0
+                board = Board.decoding(array[:board_channels, time, dim, :, :])
+                if board is not None:
+                    gift.add_board(dim_idx, board)
+            game.present_list.append(gift)
+        game.first_player = game.get_board((0, 0)).player
+        game._set_overall_range()
+        return game
+
+    def __eq__(self, other):
+        return np.array_equal(self.encoding(), other.encoding())
 
     def __str__(self):
         s = ''
@@ -703,7 +820,10 @@ class Chess5d:
 
 
 class Chess2d(Chess5d):
-    def __init__(self, present_list=None, first_player=0):
+    def __init__(self, board=None, first_player=0):
+        present_list = None
+        if board is not None:
+            present_list = Present(board=board)
         super().__init__(present_list=present_list, first_player=first_player)
 
     def piece_possible_moves(self, idx):
@@ -749,6 +869,21 @@ class Chess2d(Chess5d):
             if piece_id(captuer) == KING:
                 break
 
+    def get_current_board(self):
+        return self.present_list[-1].board
+
+    def encoding_shape(self):
+        return Board.encoding_shape()
+
+    def encoding(self):
+        return self.get_current_board().encoding()
+
+    @staticmethod
+    def decoding(array):
+        board = Board.decoding(array)
+        game = Chess2d(board=board, first_player=board.player)
+        return game
+
 
 if __name__ == '__main__':
     game = Chess5d()
@@ -791,11 +926,33 @@ if __name__ == '__main__':
     print('present', game.present())
     print('capture', game.make_move((10, 0, 2, 1), (10, -1, 0, 1)))
     print()
-    for _ in range(10):
-        game.undo_move()
+    print('present', game.present())
+    print('capture', game.make_move((11, 0, 7, 3), (11, 0, 3, 7)))
+    print()
+    print('present', game.present())
+    print('capture', game.make_move((11, -1, 7, 1), (11, -1, 5, 2)))
+    print()
+    print('present', game.present())
+    print('capture', game.make_move((12, -1, 4, 3), (8, -1, 4, 2)))
+    print()
+    # for _ in range(10):
+    #    game.undo_move()
     print('game:')
     print(game)
+    encode = (game.encoding())
+    game2 = Chess5d.decoding(encode)
+    print('decoded:')
+    print(game2)
+    print(game == game2)
 
+    T = 100
+    connections = (Chess5d.connections_of([T//2 for _ in range(4)], [T for _ in range(4)]))
+    for idx in connections:
+        print(idx)
+    print(len(list(connections)))
+    print(T**4)
+    idxs = (zip(*Chess5d.connections_of([T//2 for _ in range(4)], [T for _ in range(4)])))
+    print(list(idxs))
     quit()
     all_moves = list(game.all_possible_moves(1))
     old_init = None
