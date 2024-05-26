@@ -5,7 +5,7 @@ from torch import nn
 from networks.collapse import Collapse
 from networks.ffn import FFN
 from src.chess5d import Chess5d
-from networks.permute import CisToTransPerm
+from networks.permute import CisToTransPerm, TransToCisPerm
 
 
 class ConvBlock(nn.Module):
@@ -147,24 +147,31 @@ class CNNArchitect(nn.Module):
         super().__init__()
         if kernel is None:
             kernel = (3, 3, 3, 3)
+        self.perm1 = TransToCisPerm()
         self.enc = ConvBlock(input_channels=input_dim, output_channels=embedding_dim, kernel=kernel)
         self.layers = nn.ModuleList([
             ResBlock(num_channels=embedding_dim, kernel=kernel, middle_channels=middle_dim) for _ in
             range(num_residuals)
         ])
         # this permutation is nessary for collapsing, as collapse keeps the last dimension
-        self.perm = CisToTransPerm()
+        self.perm2 = CisToTransPerm()
         self.collapse = Collapse(embedding_dim=embedding_dim, hidden_layers=collapse_hidden_layers)
         self.output = FFN(input_dim=embedding_dim, output_dim=output_dim, hidden_layers=output_hidden_layers)
 
     def forward(self, X):
+        # X is (batch size, D1, D2, ..., input dim)
+
+        # now (batch size, input dim, D1, D2, ...)
+        X = self.perm1(X)
+
         # (batch size, embedding dim, D1, D2, ...)
         X = self.enc(X)
         for layer in self.layers:
             X = layer(X)
 
+        # (batch size, D1, D2, ..., embedding dim)
+        X = self.perm2(X)
         # (batch size, embedding_dim)
-        X = self.perm(X)
         X = self.collapse(X)
         # (batch size, 2)
         return self.output(X)
@@ -203,7 +210,8 @@ if __name__ == '__main__':
 
     # conv = ConvBlock(encoding.shape[1], 16, (3, 3, 3, 3))
     # conv = ResBlock(encoding.shape[1], (3, 3, 3, 3), middle_channels=1)
-    conv = CNNArchitect(encoding.shape[1], 69, num_residuals=2,output_dim=2)
+    # encoding = TransToCisPerm()(encoding)
+    conv = CNNArchitect(encoding.shape[-1], 69, num_residuals=2, output_dim=2)
     optim = torch.optim.Adam(params=conv.parameters())
 
     for i in range(100):
@@ -214,6 +222,5 @@ if __name__ == '__main__':
         optim.step()
         if not (i + 1)%10:
             print(loss)
-            print(conv.was_updated())
 
     print(conv.forward(encoding).shape)

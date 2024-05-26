@@ -30,4 +30,4 @@ class TransToCisPerm(nn.Module):
         # assume X has k+1 dimensions (0, ..., k)
         # this list is (0, k, 1, ..., k-1)
 
-        return X.permute(0, k, range(1, k))
+        return X.permute(0, k, *range(1, k))

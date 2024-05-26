@@ -167,7 +167,7 @@ class Board:
 
     @staticmethod
     def encoding_shape():
-        return (2*NUM_PIECES + 4, BOARD_SIZE, BOARD_SIZE)
+        return (BOARD_SIZE, BOARD_SIZE, 2*NUM_PIECES + 4)
 
     @staticmethod
     def blocked_board_encoding():
@@ -176,7 +176,7 @@ class Board:
 
     @staticmethod
     def is_blocked(encoding):
-        return encoding[2*NUM_PIECES + 3, 0, 0] == 0
+        return encoding[0, 0, 2*NUM_PIECES + 3] == 0
 
     def encoding(self):
         encoded = np.zeros(Board.encoding_shape())
@@ -191,18 +191,17 @@ class Board:
 
         k_0 = 2*NUM_PIECES
 
-        encoded[k_0, :, :] = self.player
-        encoded[2*NUM_PIECES + 3, :, :] = 1  # unblocked board marker
+        encoded[:, :, k_0] = self.player
+        encoded[:, :, 2*NUM_PIECES + 3] = 1  # unblocked board marker
         for i in range(BOARD_SIZE):
             for j in range(BOARD_SIZE):
-
                 if self.board[i][j] != EMPTY:
                     piece = self.get_piece((i, j))
                     pid = piece_id(piece)
-                    encoded[piece_dimension(pid, player_of(piece)), i, j] = 1
+                    encoded[i, j, piece_dimension(pid, player_of(piece))] = 1
 
-                    encoded[k_0 + 1, i, j] = is_unmoved(piece)
-                    encoded[k_0 + 2, i, j] = en_passantable(piece)
+                    encoded[i, j, k_0 + 1] = is_unmoved(piece)
+                    encoded[i, j, k_0 + 2] = en_passantable(piece)
 
                     # if pid == KING and is_unmoved(piece):
                     #    kings_unmoved[player_of(piece)] = True
@@ -233,16 +232,16 @@ class Board:
             for j in range(BOARD_SIZE):
                 piece = EMPTY
                 for k in range(k_0):
-                    if int(encoding[k, i, j]) == 1:
+                    if int(encoding[i, j, k]) == 1:
                         player = k//NUM_PIECES
                         pid = piece_id(piece_order[k%NUM_PIECES])
                         piece = as_player(pid, player)
-                        if encoding[k_0 + 1, i, j]:
+                        if encoding[i, j, k_0 + 1]:
                             piece += UNMOVED
-                        if encoding[k_0 + 2, i, j]:
+                        if encoding[i, j, k_0 + 2]:
                             piece += PASSANTABLE
                 pieces[i][j] = piece
-        return Board(pieces=pieces, player=int(encoding[k_0, 0, 0]))
+        return Board(pieces=pieces, player=int(encoding[0, 0, k_0]))
 
     def __str__(self):
         s = ''
@@ -794,15 +793,15 @@ class Chess5d:
 
     def encoding_shape(self):
         dimensions = 1 + self.overall_range[1] - self.overall_range[0]
-        board_channels, I, J = Board.encoding_shape()
-        return (board_channels + 3, len(self.present_list), dimensions, I, J)
+        I, J, board_channels = Board.encoding_shape()
+        return (len(self.present_list), dimensions, I, J, board_channels + 3)
 
     def encoding(self):
         encoded = np.zeros(self.encoding_shape())
-        board_channels, I, J = Board.encoding_shape()
+        I, J, board_channels = Board.encoding_shape()
         dimensions_used_by_players = np.sign(self.overall_range[1] + self.overall_range[0])
         # if negative, white used more dimensions, if postive, black used more dimensions, 0 if equal
-        encoded[board_channels + 2, :, :, :, :] = dimensions_used_by_players
+        encoded[:, :, :, :, board_channels + 2] = dimensions_used_by_players
         for time, present in enumerate(self.present_list):
             for dim in range(self.overall_range[0], self.overall_range[1] + 1):
                 board = present.get_board(dim)
@@ -812,28 +811,28 @@ class Chess5d:
                 else:
                     board_encoding = board.encoding()
                 idx_of_dim = dim - self.overall_range[0]  # since these must start at 0
-                encoded[:board_channels, time, idx_of_dim, :, :] = board_encoding
-                encoded[board_channels, time, idx_of_dim, :, :] = self.board_can_be_moved((time, dim))
-                encoded[board_channels + 1, time, idx_of_dim, :, :] = self.dim_is_active(dim)
+                encoded[time, idx_of_dim, :, :, :board_channels] = board_encoding
+                encoded[time, idx_of_dim, :, :, board_channels] = self.board_can_be_moved((time, dim))
+                encoded[time, idx_of_dim, :, :, board_channels + 1] = self.dim_is_active(dim)
 
         return encoded
 
     @staticmethod
     def decoding(array):
         game = Chess5d(present_list=[])
-        _, times, dims, _, _ = array.shape
-        board_channels, _, _ = Board.encoding_shape()
-        dimensions_used_by_players = array[board_channels + 2, 0, 0, 0, 0]
+        times, dims, *_ = array.shape
+        *_, board_channels = Board.encoding_shape()
+        dimensions_used_by_players = array[0, 0, 0, 0, board_channels + 2]
 
         active_range = [0, 0]
         for dim in range(dims):
-            if array[board_channels + 1, 0, dim, 0, 0]:
+            if array[0, dim, 0, 0, board_channels + 1]:
                 active_range[0] = dim
                 break
-
         for dim in range(dims):
-            if array[board_channels + 1, 0, dim, 0, 0]:
+            if array[0, dim, 0, 0, board_channels + 1]:
                 active_range[1] = dim
+
         center_range = copy.deepcopy(active_range)
         if dimensions_used_by_players == -1:
             center_range[0] += 1
@@ -845,7 +844,7 @@ class Chess5d:
             gift = Present()
             for dim in range(dims):
                 dim_idx = dim - d_0
-                board = Board.decoding(array[:board_channels, time, dim, :, :])
+                board = Board.decoding(array[time, dim, :, :, :board_channels])
                 if board is not None:
                     gift.add_board(dim_idx, board)
             game.present_list.append(gift)

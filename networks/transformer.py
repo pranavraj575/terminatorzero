@@ -4,7 +4,6 @@ from torch import nn
 
 from src.chess5d import Chess5d
 from networks.ffn import FFN
-from networks.permute import CisToTransPerm
 from networks.collapse import Collapse
 
 
@@ -68,7 +67,7 @@ class PositionalEncodingLayer(nn.Module):
 
 class InitialEmbedding(nn.Module):
     """
-    initally embeds a chess board (batch size, initial channels, D1, ...)
+    initally embeds a chess board (batch size, D1, D2, ..., initial channels)
         into transformer format (batch size, D1, D2, ..., embedding dim)
     """
 
@@ -82,13 +81,12 @@ class InitialEmbedding(nn.Module):
         super().__init__()
         if positional_encoding_nums is None:
             positional_encoding_nums = (8, 8, 3, 3)
-        self.perm = CisToTransPerm()
         self.pos_enc = PositionalEncodingLayer(encoding_nums=positional_encoding_nums)
         initial_embedding = initial_channels + self.pos_enc.additional_output()
         self.linear = nn.Linear(initial_embedding, embedding_dim)
 
     def forward(self, X):
-        return self.linear(self.pos_enc(self.perm(X)))
+        return self.linear(self.pos_enc(X))
 
 
 class GeneralAttentionLayer(nn.Module):
@@ -400,9 +398,8 @@ if __name__ == '__main__':
     for _ in range(10):
         game.undo_move()
     encoding = torch.tensor(game.encoding(), dtype=torch.float).unsqueeze(0)
-    encoding = CisToTransPerm()(encoding)
 
-    net = TransformerArchitect(initial_channels=encoding.shape[1],
+    net = TransformerArchitect(initial_channels=encoding.shape[-1],
                                embedding_dim=69,
                                num_decoders=2,
                                n_heads=3,
