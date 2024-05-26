@@ -13,12 +13,12 @@ class PolicyNet(nn.Module):
     def __init__(self):
         super().__init__()
 
-    def forward(self, X: torch.Tensor, move_indices) -> (torch.Tensor):
+    def forward(self, X: torch.Tensor, moves) -> (torch.Tensor):
         """
         Note: batch size is kept for legacy, it will probably be 1
         Note: must handle the END_TURN move somehow
         :param X: (batch size, D1, ..., Dk, embedding_dim)
-        :param move_indices: list (length M) of ((i1, ..., ik), (j1, ..., jk)) queries
+        :param moves: iterable (length M) of ((i1, ..., ik), (j1, ..., jk)) or END_TURN queries
         :return: (batch size, M) where each M vector is a probability distribution
         """
         raise NotImplementedError
@@ -49,17 +49,18 @@ class PolicyValueNet(nn.Module):
     """
 
     def __init__(self, policy: PolicyNet, value: ValueNet):
+        super().__init__()
         self.policy = policy
         self.value = value
 
-    def forward(self, X: torch.Tensor, move_indices) -> (torch.Tensor, torch.Tensor):
+    def forward(self, X: torch.Tensor, moves) -> (torch.Tensor, torch.Tensor):
         """
         note: batch size is kept for legacy, it will probably be 1
         :param X: (batch size, D1, ..., Dk, embedding_dim)
-        :param move_indices: list (length M) of ((i1, ..., ik), (j1, ..., jk)) queries
+        :param moves: iterable (length M) of ((i1, ..., ik), (j1, ..., jk)) queries
         :return: (batch size, M), (batch size, 1)
         """
-        return self.policy(X, move_indices), self.value(X)
+        return self.policy(X, moves), self.value(X)
 
 
 class PairwisePolicy(PolicyNet):
@@ -84,24 +85,24 @@ class PairwisePolicy(PolicyNet):
         self.no_move_output = FFN(input_dim=embedding_dim, output_dim=1, hidden_layers=no_move_output_hidden_layers)
         self.softmax = nn.Softmax(-1)
 
-    def forward(self, X: torch.Tensor, move_indices):
+    def forward(self, X: torch.Tensor, moves):
         """
         note: batch size is kept for legacy, it will probably be 1
         :param X: (batch size, D1, ..., Dk, embedding_dim)
-        :param move_indices: iterable (length M) of ((i1, ..., ik), (j1, ..., jk)) queries
+        :param moves: iterable (length M) of ((i1, ..., ik), (j1, ..., jk)) or END_TURN queries
         :return: (batch size, M) where each M vector is a probability distribution
         """
         batch_size, *_, embedding_dim = X.shape
-        move_indices = list(move_indices)
-        M = len(move_indices)
+        moves = list(moves)
+        M = len(moves)
         pre_softmax = torch.zeros((batch_size, M))
 
         skip_index = ()
         # set the pre_softmax of END_TURN, if this exists
-        if END_TURN in move_indices:
-            important_idx = move_indices.index(END_TURN)
+        if END_TURN in moves:
+            important_idx = moves.index(END_TURN)
             skip_index = (important_idx,)
-            move_indices.pop(important_idx)
+            moves.pop(important_idx)
 
             # (batch size, embedding dim)
             no_move_vector = self.no_move_collapse(X)
@@ -113,7 +114,7 @@ class PairwisePolicy(PolicyNet):
         Mp = M - len(skip_index)  # this is M-1 if END_TURN is a move, M otherwise
         # set the pre_softmax of the rest, if there are any
         if Mp > 0:
-            start_idxs, end_idxs = zip(*move_indices)
+            start_idxs, end_idxs = zip(*moves)
 
             input_array = torch.zeros((batch_size, Mp, 2*self.embedding_dim))
 
@@ -188,7 +189,21 @@ if __name__ == '__main__':
     policy = PairwisePolicy(embedding_dim=encoding.shape[-1], hidden_layers=[3], no_move_collapse_hidden_layers=[8],
                             no_move_output_hidden_layers=[80])
     value = CollapsedValue(embedding_dim=encoding.shape[-1], collapse_hidden_layers=[4], output_hidden_layers=[5])
+    pvz = PolicyValueNet(policy=policy, value=value)
+    interesting_moves = list(game.all_possible_moves(1))  # contains END_TURN
+    optim = torch.optim.Adam(params=pvz.parameters())
 
-    print(list(game.all_possible_moves(1)))
-    print(policy.forward(encoding, game.all_possible_moves(1)))
-    print(value.forward(encoding))
+    for i in range(1000):
+        optim.zero_grad()
+        policy, value = pvz(encoding, interesting_moves)
+        good_policy = torch.zeros_like(policy)
+        good_policy[0, 0] = 1
+        loss1 = torch.nn.MSELoss()(policy, good_policy)
+        loss2 = torch.nn.MSELoss()(value, torch.ones_like(value))
+        loss = loss1 + loss2
+        loss.backward()
+        optim.step()
+        if not i%100:
+            print('loss', loss)
+            print('policy', policy)
+            print('value', value)
