@@ -132,13 +132,14 @@ class CNNArchitect(nn.Module):
                  input_dim,
                  embedding_dim,
                  num_residuals,
+                 output_dim,
                  kernel=None,
                  middle_dim=None,
                  collapse_hidden_layers=None,
                  output_hidden_layers=None,
                  ):
         """
-        pastes a bunch of CNNs together and produces a vector in R^2 (eval for white and eval for black)
+        pastes a bunch of CNNs together and produces a vector in output_dim
         middle dimension will be sent to all the residual networks
         if kernel is none, use (3,3,3,3)
         kernel will be used for all CNNs
@@ -154,7 +155,7 @@ class CNNArchitect(nn.Module):
         # this permutation is nessary for collapsing, as collapse keeps the last dimension
         self.perm = CisToTransPerm()
         self.collapse = Collapse(embedding_dim=embedding_dim, hidden_layers=collapse_hidden_layers)
-        self.output = FFN(input_dim=embedding_dim, output_dim=2, hidden_layers=output_hidden_layers)
+        self.output = FFN(input_dim=embedding_dim, output_dim=output_dim, hidden_layers=output_hidden_layers)
 
     def forward(self, X):
         # (batch size, embedding dim, D1, D2, ...)
@@ -202,7 +203,7 @@ if __name__ == '__main__':
 
     # conv = ConvBlock(encoding.shape[1], 16, (3, 3, 3, 3))
     # conv = ResBlock(encoding.shape[1], (3, 3, 3, 3), middle_channels=1)
-    conv = CNNArchitect(encoding.shape[1], 69, num_residuals=2)
+    conv = CNNArchitect(encoding.shape[1], 69, num_residuals=2,output_dim=2)
     optim = torch.optim.Adam(params=conv.parameters())
 
     for i in range(100):

@@ -15,6 +15,8 @@ PASSANTABLE = '$'
 NUM_PIECES = 6
 BOARD_SIZE = 8
 
+END_TURN = 'END_TURN'
+
 
 def piece_id(piece):
     return piece[0].lower()
@@ -70,8 +72,14 @@ class Board:
         self.player = player
         if pieces is None:
             pieces = [[EMPTY for _ in range(BOARD_SIZE)] for _ in range(BOARD_SIZE)]
+            if BOARD_SIZE == 8:
+                back_rank = [ROOK + UNMOVED, KNIGHT, BISHOP, QUEEN, KING + UNMOVED, BISHOP, KNIGHT, ROOK + UNMOVED]
+            elif BOARD_SIZE == 5:
+                back_rank = [ROOK + UNMOVED, KNIGHT, BISHOP, QUEEN, KING + UNMOVED]
+            else:
+                raise Exception("NO DEFAULT FOR BOARD SIZE " + str(BOARD_SIZE))
             for i, row in enumerate((
-                    [ROOK + UNMOVED, KNIGHT, BISHOP, QUEEN, KING + UNMOVED, BISHOP, KNIGHT, ROOK + UNMOVED],
+                    back_rank,
                     [PAWN + UNMOVED for _ in range(BOARD_SIZE)]
             )):
                 pieces[i] = [piece.upper() for piece in row]
@@ -148,10 +156,12 @@ class Board:
         self.player = opponent
 
         temp_game = Chess2d(board=self)
-        for (_, end_idx) in temp_game.all_possible_moves(player=opponent):
-            if end_idx[2:] == idx:
-                self.player = store_self_player
-                return True
+        for move in temp_game.all_possible_moves(player=opponent):
+            if move is not END_TURN:
+                (_, end_idx) = move
+                if end_idx[2:] == idx:
+                    self.player = store_self_player
+                    return True
         self.player = store_self_player
         return False
 
@@ -264,12 +274,19 @@ class Present:
         self.up_list = up_list
         self.down_list = down_list
 
+    def clone(self):
+        return Present(board=None if self.board is None else self.board.clone(),
+                       up_list=[None if board is None else board.clone() for board in self.up_list],
+                       down_list=[None if board is None else board.clone() for board in self.down_list],
+                       )
+
     def flip_present(self):
         if self.board is not None:
             self.board = self.board.flipped_board()
         self.up_list, self.down_list = (
-            [board.flipped_board() if board is not None else None for board in self.down_list],
-            [board.flipped_board() if board is not None else None for board in self.up_list])
+            [None if board is None else board.flipped_board() for board in self.down_list],
+            [None if board is None else board.flipped_board() for board in self.up_list]
+        )
 
     def get_board(self, dim_idx) -> Board|None:
         if dim_idx > 0:
@@ -338,13 +355,21 @@ class Present:
 
 
 class Chess5d:
-    def __init__(self, present_list=None, first_player=0):
+    def __init__(self, present_list=None, first_player=0, check_validity=False, save_moves=True):
+        """
+        implemented 5d chess
+        :param first_player: which player plays on the first board, default 0 (white)
+        :param check_validity: whether to run validity check on each move; default false
+        :param save_moves: whether to save moves (useful for undoing moves); default True
+        """
         if present_list is None:
             present_list = [
                 Present(board=
                         Board(player=first_player)
                         )
             ]
+        self.check_validity = check_validity
+        self.save_moves = save_moves
         self.present_list = present_list
         self.first_player = first_player
         self.overall_range = None
@@ -352,7 +377,19 @@ class Chess5d:
         self.move_history = []
         self.dimension_spawn_history = dict()
 
+    def clone(self):
+        game = Chess5d(present_list=[present.clone() for present in self.present_list],
+                       first_player=self.first_player,
+                       check_validity=self.check_validity,
+                       save_moves=self.save_moves,
+                       )
+        game.move_history = copy.deepcopy(self.move_history)
+        game.dimension_spawn_history = copy.deepcopy(self.dimension_spawn_history)
+        return game
+
     def _flip_move(self, move):
+        if move is END_TURN:
+            return move
         ((time1, dim1, i1, j1), (time2, dim2, i2, j2)) = move
         return ((time1, -dim1, BOARD_SIZE - 1 - i1, j1), (time2, -dim2, BOARD_SIZE - 1 - i2, j2))
 
@@ -391,13 +428,16 @@ class Chess5d:
             end_idx: (time, dimension, x, y), must be to an existing board, and
         this will edit the game state to remove the piece at idx, move it to end_idx
         """
-
         idx, end_idx = move
-        if end_idx not in list(self.piece_possible_moves(idx)):
-            print("WARNING INVALID MOVE:", idx, '->', end_idx)
-        if not self.board_can_be_moved(idx[:2]):
-            print("WARNING MOVE MADE ON INVALID BOARD:", idx[:2])
-        self.move_history.append(move)
+        if self.save_moves:
+            self.move_history.append(move)
+        if move is END_TURN:
+            return EMPTY
+        if self.check_validity:
+            if not self.board_can_be_moved(idx[:2]):
+                raise Exception("WARNING MOVE MADE ON INVALID BOARD: " + str(idx[:2]))
+            if end_idx not in list(self.piece_possible_moves(idx)):
+                raise Exception("WARNING INVALID MOVE: " + str(idx) + ' -> ' + str(end_idx))
 
         time1, dim1, i1, j1 = idx
         old_board = self.get_board((time1, dim1))
@@ -442,7 +482,7 @@ class Chess5d:
 
     def undo_move(self, move=None):
         """
-        undos specified move, last move by default
+        undoes specified move, last move by default
         """
         if move is None:
             if self.move_history:
@@ -450,6 +490,10 @@ class Chess5d:
             else:
                 print('WARNING: no moves to undo')
                 return
+        if move is END_TURN:
+            rindex = self.move_history[::-1].index(move)
+            self.move_history.pop(len(self.move_history) - 1 - rindex)
+            return
 
         def remove_board(td_idx):
             time, dim = td_idx
@@ -458,9 +502,9 @@ class Chess5d:
                 self.present_list.pop(time)
 
         idx, end_idx = move
-        if move not in self.move_history:
-            print("ERROR move", idx, '->', end_idx, 'never was made')
-            return
+        if self.check_validity:
+            if move not in self.move_history:
+                raise Exception("ERROR move " + str(idx) + ' -> ' + str(end_idx) + ' never was made')
         if move != self.move_history[-1]:
             print("WARNING: move", idx, '->', end_idx, 'was not the last move made')
         time1, dim1, i1, j1 = idx
@@ -471,7 +515,7 @@ class Chess5d:
         remove_board((time1 + 1, dim))  # should be right after time1
 
         if (time1, dim1) != (time2, dim2):
-            # if there is a  time dimension jump, another board is created
+            # if there is a time dimension jump, another board is created
             dim = self.dimension_made_by((time2, dim2), move)
             remove_board((time2 + 1, dim))  # should be right after time2
 
@@ -493,7 +537,7 @@ class Chess5d:
     def idx_exists(self, td_idx, ij_idx=(0, 0)) -> bool:
         time, dim = td_idx
         i, j = ij_idx
-        if i < 0 or j < 0 or i > 7 or j > 7:
+        if i < 0 or j < 0 or i >= BOARD_SIZE or j >= BOARD_SIZE:
             return False
         if time >= len(self.present_list) or time < 0:
             return False
@@ -515,6 +559,7 @@ class Chess5d:
         if not self.idx_exists((time + 1, dim)):
             # in this case dimension does not change
             new_dim = dim
+            added_dim = False
         else:
             player = self.player_at(time=time)
             if player == 0:  # white move
@@ -523,15 +568,15 @@ class Chess5d:
             else:  # black move
                 new_dim = self.overall_range[1] + 1
                 self.overall_range[1] += 1
-
+            added_dim = True
         if len(self.present_list) <= time + 1:
             gift = Present()
             gift.add_board(new_dim, board)
             self.present_list.append(gift)
         else:
             self.present_list[time + 1].add_board(new_dim, board)
-
-        self.dimension_spawn_history[(td_idx, move)] = new_dim
+        if self.save_moves:
+            self.dimension_spawn_history[(td_idx, move)] = new_dim
 
     def board_can_be_moved(self, td_idx):
         """
@@ -667,10 +712,24 @@ class Chess5d:
             player = self.player_at(time=self.present())
         if self.player_at(time=self.present()) != player:
             # the player does not have to move
-            yield None
+            yield END_TURN
         for idx in self.pieces_that_can_move(player=player):
             for end_idx in self.piece_possible_moves(idx):
                 yield (idx, end_idx)
+
+    def is_stalemate(self, player=None):
+        """
+        returns if no possible moves
+        if player is None, return player that has to move
+        """
+        if player is None:
+            return self.player_at(self.present())
+        try:
+            # why is there no better way to check if a generator is empty
+            next(self.all_possible_moves(player=player))
+            return False
+        except StopIteration:
+            return True
 
     @staticmethod
     def connections_of(idx, boardsize):
@@ -794,6 +853,15 @@ class Chess5d:
         game._set_overall_range()
         return game
 
+    @staticmethod
+    def flip_encoding(array):
+        """
+        returns the array that would be the flipped game
+        """
+        game = Chess5d.decoding(array)
+        game.flip_game()
+        return game.encoding()
+
     def __eq__(self, other):
         return np.array_equal(self.encoding(), other.encoding())
 
@@ -824,7 +892,7 @@ class Chess2d(Chess5d):
     def __init__(self, board=None, first_player=0):
         present_list = None
         if board is not None:
-            present_list = Present(board=board)
+            present_list = [Present(board=board)]
         super().__init__(present_list=present_list, first_player=first_player)
 
     def piece_possible_moves(self, idx):
@@ -890,7 +958,7 @@ class Chess2d(Chess5d):
 
 
 if __name__ == '__main__':
-    game = Chess5d()
+    game = Chess5d(save_moves=True, check_validity=True)
     print('present', game.present())
     print('capture', game.make_move(((0, 0, 1, 3), (0, 0, 3, 3))))
     print()
@@ -939,8 +1007,9 @@ if __name__ == '__main__':
     print('present', game.present())
     print('capture', game.make_move(((12, -1, 4, 3), (8, -1, 4, 2))))
     print()
-    # for _ in range(10):
-    #    game.undo_move()
+    gameclone = game.clone()
+    for _ in range(10):
+        game.undo_move()
     print('game:')
     print(game)
     encode = (game.encoding())
@@ -949,7 +1018,7 @@ if __name__ == '__main__':
     print(game2)
     print(game == game2)
 
-    T = 100
+    T = 4
     connections = (Chess5d.connections_of([T//2 for _ in range(4)], [T for _ in range(4)]))
     for idx in connections:
         print(idx)
@@ -957,15 +1026,3 @@ if __name__ == '__main__':
     print(T**4)
     idxs = (zip(*Chess5d.connections_of([T//2 for _ in range(4)], [T for _ in range(4)])))
     print(list(idxs))
-    quit()
-    all_moves = list(game.all_possible_moves(1))
-    old_init = None
-    for move in all_moves:
-        if move is None:
-            print(move)
-            continue
-        idx, end_idx = move
-        if idx != old_init:
-            print()
-            old_init = idx
-        print(piece_id(game.get_piece(idx)), idx, '->', end_idx)

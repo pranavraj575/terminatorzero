@@ -318,6 +318,7 @@ class TransformerArchitect(nn.Module):
                  embedding_dim,
                  num_decoders,
                  n_heads,
+                 output_dim,
                  positional_encoding_nums=None,
                  drop_prob=.2,
                  decoder_hidden_layers=None,
@@ -325,7 +326,7 @@ class TransformerArchitect(nn.Module):
                  output_hidden_layers=None,
                  ):
         """
-        pastes a bunch of transformers together and produces a vector in R^2 (eval for white and eval for black)
+        pastes a bunch of transformers together and produces a vector in output_dim
 
         data is of shape (batch size, initial channels, D1, ...)
 
@@ -360,7 +361,7 @@ class TransformerArchitect(nn.Module):
             for _ in range(num_decoders)
         ])
         self.collapse = Collapse(embedding_dim=embedding_dim, hidden_layers=collapse_hidden_layers)
-        self.output = FFN(input_dim=embedding_dim, output_dim=2, hidden_layers=output_hidden_layers)
+        self.output = FFN(input_dim=embedding_dim, output_dim=output_dim, hidden_layers=output_hidden_layers)
 
     def forward(self, X):
         # (batch size, D1, D2, ..., embedding dim)
@@ -405,6 +406,7 @@ if __name__ == '__main__':
                                embedding_dim=69,
                                num_decoders=2,
                                n_heads=3,
+                               output_dim=2,
                                )
 
     optim = torch.optim.Adam(params=net.parameters())
