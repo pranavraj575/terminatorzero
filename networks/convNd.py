@@ -1,3 +1,7 @@
+"""
+convolutional networks
+treats input board (batch size, D1, ..., input_dim) as a 4d array, and convolves appropriately
+"""
 import torchConvNd
 import torch
 from torch import nn
@@ -9,7 +13,7 @@ from networks.permute import CisToTransPerm, TransToCisPerm
 
 
 class ConvBlock(nn.Module):
-    def __init__(self, input_channels, output_channels, kernel):
+    def __init__(self, input_channels: int, output_channels: int, kernel):
         """
         kernel must be all odd numbers so that dimension stays the same
         """
@@ -31,7 +35,7 @@ class ConvBlock(nn.Module):
         self.bn1 = nn.BatchNorm1d(output_channels)
         self.relu1 = nn.ReLU()
 
-    def forward(self, X):
+    def forward(self, X: torch.Tensor) -> torch.Tensor:
         """
         :param X: shaped (batch size, input channels, D1, D2, ...)
         :return: (batch size, output channels, D1, D2, ...)
@@ -57,7 +61,7 @@ class ResBlock(nn.Module):
     uses two convolutions and adds the result to the input
     """
 
-    def __init__(self, num_channels, kernel, middle_channels=None):
+    def __init__(self, num_channels: int, kernel, middle_channels=None):
         """
         if middle_channels is None, use num_channels in the middle
         kernel must be all odd numbers so that we can keep the dimensions the same
@@ -92,7 +96,7 @@ class ResBlock(nn.Module):
         self.bn2 = nn.BatchNorm1d(num_channels)
         self.relu2 = nn.ReLU()
 
-    def forward(self, X):
+    def forward(self, X: torch.Tensor) -> torch.Tensor:
         """
         :param X: shaped (batch size, input channels, D1, D2, ...)
         :return: (batch size, output channels, D1, D2, ...)
@@ -127,64 +131,6 @@ class ResBlock(nn.Module):
                 yield param
 
 
-class CNNArchitect(nn.Module):
-    def __init__(self,
-                 input_dim,
-                 embedding_dim,
-                 num_residuals,
-                 output_dim,
-                 kernel=None,
-                 middle_dim=None,
-                 collapse_hidden_layers=None,
-                 output_hidden_layers=None,
-                 ):
-        """
-        pastes a bunch of CNNs together and produces a vector in output_dim
-        middle dimension will be sent to all the residual networks
-        if kernel is none, use (3,3,3,3)
-        kernel will be used for all CNNs
-        """
-        super().__init__()
-        if kernel is None:
-            kernel = (3, 3, 3, 3)
-        self.perm1 = TransToCisPerm()
-        self.enc = ConvBlock(input_channels=input_dim, output_channels=embedding_dim, kernel=kernel)
-        self.layers = nn.ModuleList([
-            ResBlock(num_channels=embedding_dim, kernel=kernel, middle_channels=middle_dim) for _ in
-            range(num_residuals)
-        ])
-        # this permutation is nessary for collapsing, as collapse keeps the last dimension
-        self.perm2 = CisToTransPerm()
-        self.collapse = Collapse(embedding_dim=embedding_dim, hidden_layers=collapse_hidden_layers)
-        self.output = FFN(input_dim=embedding_dim, output_dim=output_dim, hidden_layers=output_hidden_layers)
-
-    def forward(self, X):
-        # X is (batch size, D1, D2, ..., input dim)
-
-        # now (batch size, input dim, D1, D2, ...)
-        X = self.perm1(X)
-
-        # (batch size, embedding dim, D1, D2, ...)
-        X = self.enc(X)
-        for layer in self.layers:
-            X = layer(X)
-
-        # (batch size, D1, D2, ..., embedding dim)
-        X = self.perm2(X)
-        # (batch size, embedding_dim)
-        X = self.collapse(X)
-        # (batch size, 2)
-        return self.output(X)
-
-    def parameters(self, recurse: bool = True):
-        for module in (self.enc, self.collapse, self.output):
-            for param in module.parameters():
-                yield param
-        for module in self.layers:
-            for param in module.parameters():
-                yield param
-
-
 if __name__ == '__main__':
 
     game = Chess5d()
@@ -208,10 +154,9 @@ if __name__ == '__main__':
 
     encoding = torch.tensor(game.encoding(), dtype=torch.float).unsqueeze(0)
 
+    encoding = TransToCisPerm()(encoding)
     # conv = ConvBlock(encoding.shape[1], 16, (3, 3, 3, 3))
-    # conv = ResBlock(encoding.shape[1], (3, 3, 3, 3), middle_channels=1)
-    # encoding = TransToCisPerm()(encoding)
-    conv = CNNArchitect(encoding.shape[-1], 69, num_residuals=2, output_dim=2)
+    conv = ResBlock(encoding.shape[1], (3, 3, 3, 3), middle_channels=1)
     optim = torch.optim.Adam(params=conv.parameters())
 
     for i in range(100):

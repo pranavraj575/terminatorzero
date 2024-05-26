@@ -1,3 +1,6 @@
+"""
+to collapse a sequence3
+"""
 import torch
 from torch import nn
 from networks.ffn import FFN
@@ -10,7 +13,7 @@ class Collapse(nn.Module):
     learns a FFN to determine relevance of each element
     """
 
-    def __init__(self, embedding_dim, hidden_layers=None):
+    def __init__(self, embedding_dim: int, hidden_layers=None):
         """
         if hideen layers is none, the FFN learned is a simple linear map
         """
@@ -20,7 +23,7 @@ class Collapse(nn.Module):
         self.ffn = FFN(input_dim=embedding_dim, output_dim=1, hidden_layers=hidden_layers)
         self.softmax = nn.Softmax(-1)
 
-    def forward(self, X):
+    def forward(self, X: torch.Tensor) -> torch.Tensor:
         """
         :param X: (batch size, *, embedding_dim)
         :return: (batch size, embedding_dim)

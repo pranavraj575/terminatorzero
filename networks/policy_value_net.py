@@ -1,3 +1,7 @@
+"""
+networks that take a sequence (batch size, D1, ..., embedding_dim)
+    to output a value/policy
+"""
 import torch
 from torch import nn
 from networks.ffn import FFN
@@ -13,7 +17,7 @@ class PolicyNet(nn.Module):
     def __init__(self):
         super().__init__()
 
-    def forward(self, X: torch.Tensor, moves) -> (torch.Tensor):
+    def forward(self, X: torch.Tensor, moves) -> torch.Tensor:
         """
         Note: batch size is kept for legacy, it will probably be 1
         Note: must handle the END_TURN move somehow
@@ -69,10 +73,11 @@ class PairwisePolicy(PolicyNet):
     uses a fully connected neural network on the start position and end position to return a probability distribution
     """
 
-    def __init__(self, embedding_dim,
+    def __init__(self, embedding_dim: int,
                  hidden_layers=None,
                  no_move_collapse_hidden_layers=None,
-                 no_move_output_hidden_layers=None):
+                 no_move_output_hidden_layers=None,
+                 ):
         """
         :param embedding_dim: dimenstion of input embedding
         :param hidden_layers: hidden layers to put in between (default None)
@@ -85,7 +90,7 @@ class PairwisePolicy(PolicyNet):
         self.no_move_output = FFN(input_dim=embedding_dim, output_dim=1, hidden_layers=no_move_output_hidden_layers)
         self.softmax = nn.Softmax(-1)
 
-    def forward(self, X: torch.Tensor, moves):
+    def forward(self, X: torch.Tensor, moves) -> torch.Tensor:
         """
         note: batch size is kept for legacy, it will probably be 1
         :param X: (batch size, D1, ..., Dk, embedding_dim)
@@ -95,21 +100,25 @@ class PairwisePolicy(PolicyNet):
         batch_size, *_, embedding_dim = X.shape
         moves = list(moves)
         M = len(moves)
+        if M == 0:
+            # this probably shouldn't happen
+            return None
         pre_softmax = torch.zeros((batch_size, M))
 
         skip_index = ()
         # set the pre_softmax of END_TURN, if this exists
         if END_TURN in moves:
-            important_idx = moves.index(END_TURN)
-            skip_index = (important_idx,)
-            moves.pop(important_idx)
+            # which indices to skip (should probably just be one, but can handle multiple)
+            skip_index = tuple(i for i, move in enumerate(moves) if move == END_TURN)
+            for idx in skip_index[::-1]:
+                moves.pop(idx)
 
             # (batch size, embedding dim)
             no_move_vector = self.no_move_collapse(X)
             # (batch size, 1)
             no_move_value = self.no_move_output(no_move_vector)
 
-            pre_softmax[:, important_idx] = no_move_value[:, 0]
+            pre_softmax[:, skip_index] = no_move_value[:, 0]
 
         Mp = M - len(skip_index)  # this is M-1 if END_TURN is a move, M otherwise
         # set the pre_softmax of the rest, if there are any
@@ -143,7 +152,7 @@ class CollapsedValue(ValueNet):
     """
 
     def __init__(self,
-                 embedding_dim,
+                 embedding_dim: int,
                  collapse_hidden_layers=None,
                  output_hidden_layers=None,
                  ):

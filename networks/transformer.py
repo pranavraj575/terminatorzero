@@ -1,3 +1,8 @@
+"""
+modules to implement 4d transformers
+    mostly the same as normal transformers, except for positional encoding
+    we encode each dimension separetly, and append instead of adding to the input sequence
+"""
 import itertools
 import torch
 from torch import nn
@@ -13,7 +18,7 @@ class PositionalEncodingLayer(nn.Module):
         super().__init__()
         self.encoding_nums = encoding_nums
 
-    def additional_output(self):
+    def additional_output(self) -> int:
         return 2*sum(self.encoding_nums)
 
     def forward(self, X: torch.Tensor) -> torch.Tensor:
@@ -71,7 +76,7 @@ class InitialEmbedding(nn.Module):
         into transformer format (batch size, D1, D2, ..., embedding dim)
     """
 
-    def __init__(self, initial_channels, embedding_dim, positional_encoding_nums=None):
+    def __init__(self, initial_channels: int, embedding_dim: int, positional_encoding_nums=None):
         """
         inital channels is the number of channels expected in the embedding
         positional encoding nums are the number of encodings to use for each dimension
@@ -85,7 +90,7 @@ class InitialEmbedding(nn.Module):
         initial_embedding = initial_channels + self.pos_enc.additional_output()
         self.linear = nn.Linear(initial_embedding, embedding_dim)
 
-    def forward(self, X):
+    def forward(self, X: torch.Tensor) -> torch.Tensor:
         return self.linear(self.pos_enc(X))
 
 
@@ -108,7 +113,7 @@ class GeneralAttentionLayer(nn.Module):
         self.out_dim = out_dim
         self.cmp_dim = cmp_dim
 
-    def forward(self, query_X: torch.Tensor, key_X: torch.Tensor, value_X: torch.Tensor):
+    def forward(self, query_X: torch.Tensor, key_X: torch.Tensor, value_X: torch.Tensor) -> torch.Tensor:
         """
         query_X, key_X and value_X have shape (batch_size, D1, D2, D3, D4, in_dim).
 
@@ -129,7 +134,7 @@ class SelfAttentionLayerFull(GeneralAttentionLayer):
     def __init__(self, in_dim: int, out_dim: int, cmp_dim=None) -> None:
         super().__init__(in_dim=in_dim, out_dim=out_dim, cmp_dim=cmp_dim)
 
-    def forward(self, query_X: torch.Tensor, key_X: torch.Tensor, value_X: torch.Tensor):
+    def forward(self, query_X: torch.Tensor, key_X: torch.Tensor, value_X: torch.Tensor) -> torch.Tensor:
         """
         query_X, key_X and value_X have shape (batch_size, D1, D2, D3, D4, in_dim).
 
@@ -171,7 +176,7 @@ class SelfAttentionLayerSingleMove(GeneralAttentionLayer):
     def __init__(self, in_dim: int, out_dim: int, cmp_dim=None) -> None:
         super().__init__(in_dim=in_dim, out_dim=out_dim, cmp_dim=cmp_dim)
 
-    def forward(self, query_X: torch.Tensor, key_X: torch.Tensor, value_X: torch.Tensor):
+    def forward(self, query_X: torch.Tensor, key_X: torch.Tensor, value_X: torch.Tensor) -> torch.Tensor:
         """
         query_X, key_X and value_X have shape (batch_size, D1, D2, D3, D4, in_dim).
 
@@ -260,7 +265,11 @@ class MultiHeadedAttentionFull(GeneralAttentionToMultiHead):
 
 
 class DecoderBlock(nn.Module):
-    def __init__(self, embedding_dim, n_heads, drop_prob=.2, hidden_layers=None):
+    def __init__(self, embedding_dim: int, n_heads: int, drop_prob: float = .2, hidden_layers=None):
+        """
+        decoder block
+        :param hidden_layers: sent to ffn at the end
+        """
         super(DecoderBlock, self).__init__()
 
         self.attention1 = MultiHeadedAttentionSingleMove(n_heads=n_heads,
@@ -310,70 +319,6 @@ class DecoderBlock(nn.Module):
         return self.norm3(_X + self.dropout3(X))
 
 
-class TransformerArchitect(nn.Module):
-    def __init__(self,
-                 initial_channels,
-                 embedding_dim,
-                 num_decoders,
-                 n_heads,
-                 output_dim,
-                 positional_encoding_nums=None,
-                 drop_prob=.2,
-                 decoder_hidden_layers=None,
-                 collapse_hidden_layers=None,
-                 output_hidden_layers=None,
-                 ):
-        """
-        pastes a bunch of transformers together and produces a vector in output_dim
-
-        data is of shape (batch size, initial channels, D1, ...)
-
-        num decoders is the number of decoder blocks to use
-        decoder_hidden_layers is the hidden layers to use in the NN at the end of each decoder
-        drop_prob is the dropout to use in each decoder
-        num_heads is the number of attention heads
-
-        embedding dimension is used by all decoders
-        positional encoding nums is the number of positional encodings to use on each dimension
-            default is (8,8,3,3)
-
-        collapse_hidden_layers and output_hidden_layers are used in collapse and output respectively
-            default collapse is just a linear connection
-            default output is [4*embedding_layer]
-        """
-        super().__init__()
-        if positional_encoding_nums is None:
-            positional_encoding_nums = (8, 8, 3, 3)
-        if output_hidden_layers is None:
-            output_hidden_layers = [4*embedding_dim]
-
-        self.emb = InitialEmbedding(initial_channels=initial_channels,
-                                    embedding_dim=embedding_dim,
-                                    positional_encoding_nums=positional_encoding_nums)
-
-        self.blocks = nn.ModuleList([
-            DecoderBlock(embedding_dim=embedding_dim,
-                         n_heads=n_heads,
-                         drop_prob=drop_prob,
-                         hidden_layers=decoder_hidden_layers)
-            for _ in range(num_decoders)
-        ])
-        self.collapse = Collapse(embedding_dim=embedding_dim, hidden_layers=collapse_hidden_layers)
-        self.output = FFN(input_dim=embedding_dim, output_dim=output_dim, hidden_layers=output_hidden_layers)
-
-    def forward(self, X):
-        # (batch size, D1, D2, ..., embedding dim)
-        X = self.emb(X)
-        for block in self.blocks:
-            X = block(X)
-
-        # (batch size, embedding_dim)
-        X = self.collapse(X)
-
-        # (batch size, 2)
-        return self.output(X)
-
-
 if __name__ == '__main__':
     import time as timothy
 
@@ -399,12 +344,9 @@ if __name__ == '__main__':
         game.undo_move()
     encoding = torch.tensor(game.encoding(), dtype=torch.float).unsqueeze(0)
 
-    net = TransformerArchitect(initial_channels=encoding.shape[-1],
-                               embedding_dim=69,
-                               num_decoders=2,
-                               n_heads=3,
-                               output_dim=2,
-                               )
+    net = DecoderBlock(embedding_dim=encoding.shape[-1],
+                       n_heads=3
+                       )
 
     optim = torch.optim.Adam(params=net.parameters())
     start = timothy.time()

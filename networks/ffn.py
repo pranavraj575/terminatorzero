@@ -1,3 +1,7 @@
+"""
+simple feed forward NN
+"""
+import torch
 from torch import nn
 
 
@@ -6,7 +10,7 @@ class FFN(nn.Module):
     simple feed forward network with ReLU activation and specified hidden layers
     """
 
-    def __init__(self, input_dim, output_dim, hidden_layers=None):
+    def __init__(self, input_dim: int, output_dim: int, hidden_layers=None):
         super().__init__()
         if hidden_layers is None:
             hidden_layers = []
@@ -17,7 +21,7 @@ class FFN(nn.Module):
             self.nn_layers.append(nn.ReLU())
         self.nn_layers.append(nn.Linear(hidden_layers[-1], output_dim))
 
-    def forward(self, X):
+    def forward(self, X: torch.Tensor) -> torch.Tensor:
         """
         :param X: (*, input_dim)
         :return: (*, output_dim)
