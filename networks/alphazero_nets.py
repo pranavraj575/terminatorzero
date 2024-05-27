@@ -3,7 +3,7 @@ full networks that go from encoded game (batch size, D1, ..., input_dim) to (pol
 """
 import torch
 from torch import nn
-from networks.transformer import InitialEmbedding, PositionalEncodingLayer, DecoderBlock
+from networks.transformer import InitialEmbedding, DecoderBlock
 from networks.permute import TransToCisPerm, CisToTransPerm
 from networks.convNd import ConvBlock, ResBlock
 from networks.policy_value_net import PairwisePolicy, CollapsedValue, PolicyValueNet

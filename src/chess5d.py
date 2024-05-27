@@ -149,22 +149,6 @@ class Board:
         """
         return Board(pieces=copy.deepcopy(self.board), player=self.player)
 
-    def is_dangerous(self, player, idx):
-        store_self_player = self.player
-
-        opponent = 1 - player
-        self.player = opponent
-
-        temp_game = Chess2d(board=self)
-        for move in temp_game.all_possible_moves(player=opponent):
-            if move is not END_TURN:
-                (_, end_idx) = move
-                if end_idx[2:] == idx:
-                    self.player = store_self_player
-                    return True
-        self.player = store_self_player
-        return False
-
     @staticmethod
     def encoding_shape():
         return (BOARD_SIZE, BOARD_SIZE, 2*NUM_PIECES + 4)
@@ -262,6 +246,14 @@ class Board:
             s += '\n'
         return s
 
+
+class Timeline:
+    def __init__(self, board_list=None, start_idx=0):
+        if board_list is None:
+            board_list = []
+        self.start_idx = start_idx
+        self.board_list = board_list
+        
 
 class Present:
     def __init__(self, board=None, up_list=None, down_list=None):
@@ -427,11 +419,12 @@ class Chess5d:
             end_idx: (time, dimension, x, y), must be to an existing board, and
         this will edit the game state to remove the piece at idx, move it to end_idx
         """
-        idx, end_idx = move
+
         if self.save_moves:
             self.move_history.append(move)
         if move is END_TURN:
             return EMPTY
+        idx, end_idx = move
         if self.check_validity:
             if not self.board_can_be_moved(idx[:2]):
                 raise Exception("WARNING MOVE MADE ON INVALID BOARD: " + str(idx[:2]))
@@ -442,7 +435,7 @@ class Chess5d:
         old_board = self.get_board((time1, dim1))
         new_board, piece = old_board.remove_piece((i1, j1))
         if piece == EMPTY:
-            print("WARNING: no piece on square")
+            raise Exception("WARNING: no piece on square")
         piece = get_moved_piece(piece, idx, end_idx)
         time2, dim2, i2, j2 = end_idx
         if (time1, dim1) == (time2, dim2):
@@ -598,17 +591,10 @@ class Chess5d:
                 if self.idx_exists((t, d)) and self.board_can_be_moved((t, d)):
                     yield (t, d)
 
-    def pieces_that_can_move(self, player):
-        """
-        returns iterable of indexes of pieces of player that are able to move
-
-        :return iterable (time, dimension, i, j)
-        """
+    def players_boards_with_possible_moves(self, player):
         for (t, d) in self.boards_with_possible_moves():
             if self.player_at(time=t) == player:
-                board = self.get_board((t, d))
-                for (i, j) in board.pieces_of(player):
-                    yield (t, d, i, j)
+                yield (t, d)
 
     def piece_possible_moves(self, idx):
         """
@@ -694,12 +680,21 @@ class Chess5d:
                             works = True
                             for k in range(1, 3):
                                 idx_temp = (idx_time, idx_dim, rook_i, idx_j + dir*k)
-                                if self.is_dangerous(player_of(piece), idx_temp):
+                                # NOTE: the game only checks if the square is dangerous for non-timetravling pieces
+                                if self.is_dangerous(player=player_of(piece), idx=idx_temp, time_travel=False):
                                     works = False
                                 if player_of(self.get_piece(idx_temp)) is not None:
                                     works = False
                             if works:
                                 yield (idx_time, idx_dim, idx_i, idx_j + 2*dir)
+
+    def board_all_possible_moves(self, td_idx):
+        t, d = td_idx
+        board = self.get_board(td_idx)
+        for (i, j) in board.pieces_of(self.player_at(t)):
+            idx = (t, d, i, j)
+            for end_idx in self.piece_possible_moves(idx):
+                yield idx, end_idx
 
     def all_possible_moves(self, player=None):
         """
@@ -712,9 +707,20 @@ class Chess5d:
         if self.player_at(time=self.present()) != player:
             # the player does not have to move
             yield END_TURN
-        for idx in self.pieces_that_can_move(player=player):
-            for end_idx in self.piece_possible_moves(idx):
-                yield (idx, end_idx)
+        for td_idx in self.players_boards_with_possible_moves(player=player):
+            for move in self.board_all_possible_moves(td_idx=td_idx):
+                yield move
+
+    def all_possible_movesets(self, player=None):
+        """
+        returns an iterable of all possible sets of moves of the specified player
+
+            if player is None, uses the first player that needs to move
+            {} is included if the player does not NEED to move
+        """
+        if player is None:
+            player = self.player_at(self.present())
+        raise NotImplementedError
 
     def is_stalemate(self, player=None):
         """
@@ -762,14 +768,23 @@ class Chess5d:
                 if np.all(pos >= 0) and np.all(pos < boardsize):
                     yield tuple(pos)
 
-    def is_dangerous(self, player, idx):
+    def is_dangerous(self, player, idx, time_travel=True):
         """
         returns if a square is dangerous for a player
 
-        since this is implemented weirdly in the game, we will just return if there is a threat on the same board
+        this is sometimes implemented weirdly in the game,
+            if time_travel is true, consider all possible opponent moves
+            if false, only consider moves without time travel (i.e. on same board)
         """
-        board = self.get_board(idx[:2])
-        board.is_dangerous(player, idx[2:])
+        for move in self.all_possible_moves(player=1 - player):
+            if move is not END_TURN:
+                start_idx, end_idx = move
+                if time_travel == False and start_idx[:2] == end_idx[:2]:
+                    # in this case, we ignore since time travel is not considered
+                    continue
+                if end_idx == idx:
+                    return True
+        return False
 
     def player_at(self, time=None):
         """
@@ -907,6 +922,8 @@ class Chess2d(Chess5d):
             idx: (i,j)
             end_idx: (i,j)
         """
+        if move is END_TURN:
+            return super().make_move(move)
         idx, end_idx = move
         if len(idx) == 4:
             return super().make_move(move)
@@ -940,7 +957,7 @@ class Chess2d(Chess5d):
             if piece_id(captuer) == KING:
                 break
 
-    def get_current_board(self):
+    def get_current_board(self) -> Board:
         return self.present_list[-1].board
 
     def encoding_shape(self):
@@ -954,6 +971,18 @@ class Chess2d(Chess5d):
         board = Board.decoding(array)
         game = Chess2d(board=board, first_player=board.player)
         return game
+
+    def clone(self):
+        game = Chess2d(board=self.get_current_board().clone(),
+                       first_player=self.first_player
+                       )
+        game.present_list = [present.clone() for present in self.present_list]
+        game.move_history = copy.deepcopy(self.move_history)
+        game.dimension_spawn_history = copy.deepcopy(self.dimension_spawn_history)
+        return game
+
+    def __str__(self):
+        return self.get_current_board().__str__()
 
 
 if __name__ == '__main__':
