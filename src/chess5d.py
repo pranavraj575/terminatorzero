@@ -518,14 +518,15 @@ class Chess5d:
         self.dimension_spawn_history = {((time_idx, -dim_idx), self._flip_move(move)): -dim
                                         for ((time_idx, dim_idx), move), dim in self.dimension_spawn_history.items()}
 
-    def get_active_number(self):
+    def get_active_number(self, dim_range=None):
         """
         returns number of potential active timelines in each direction
 
         i.e. if return is 5, any timeline at most 5 away is active
         """
-        overall_range = self.multiverse.get_range()
-        return min(overall_range[1], -overall_range[0]) + 1
+        if dim_range is None:
+            dim_range = self.multiverse.get_range()
+        return min(dim_range[1], -dim_range[0]) + 1
 
     def dim_is_active(self, dim):
         return abs(dim) <= self.get_active_number()
@@ -808,13 +809,11 @@ class Chess5d:
             for move in self.board_all_possible_moves(td_idx=td_idx, castling=castling):
                 yield move
 
-    def all_possible_turn_sets(self, player=None):
+    def all_possible_turn_subsets(self, player=None):
         """
-        returns an iterable of all possible turns of the specified player (sets of moves that can be ordered to advance
-                            the present)
+        returns an iterable of all possible turns subsets of the specified player
 
             if player is None, uses the first player that needs to move
-            {} is included if the player does not NEED to move
 
         this problem is equivalent to the following:
             consider the set of all possible moves, ignoring those that do not move to a currently active board
@@ -869,14 +868,16 @@ class Chess5d:
             for source in edge_list:
                 if source not in used_vertices:
                     for end in edge_list[source]:
-                        for (subsub, all_source,all_used) in all_DAG_subgraphs_with_property(edge_list=edge_list,
-                                                                                  used_sources=
-                                                                                  used_sources.union({source}),
-                                                                                  used_vertices=
-                                                                                  used_vertices.union({source, end}),
-                                                                                  ):
+                        for (subsub, all_source, all_used) in all_DAG_subgraphs_with_property(edge_list=edge_list,
+                                                                                              used_sources=
+                                                                                              used_sources.union(
+                                                                                                  {source}),
+                                                                                              used_vertices=
+                                                                                              used_vertices.union(
+                                                                                                  {source, end}),
+                                                                                              ):
                             yield (((source, end),) + subsub,
-                                   all_source,all_used)
+                                   all_source, all_used)
 
         if player is None:
             player = self.player_at(self.present())
@@ -884,19 +885,19 @@ class Chess5d:
         # we will make a graph as in the description
         # this does not change theoretic runtime, but will in practice probably help a lot
 
-        active_boards = set(self.players_boards_with_possible_moves(player=player))
+        possible_boards = set(self.players_boards_with_possible_moves(player=player))
 
         # this will be a list of lists
         # all moves on each board playable board
         partition = dict()  # partitions all moves by start, end board
         edge_list = {td_idx: set() for td_idx in
-                     active_boards}  # edges we care about, just the edges between active boards
-        non_edges = {td_idx: set() for td_idx in active_boards}  # other moves, active -> inactive boards
-        for td_idx in active_boards:
+                     possible_boards}  # edges we care about, just the edges between active boards
+        non_edges = {td_idx: set() for td_idx in possible_boards}  # other moves, active -> inactive boards
+        for td_idx in possible_boards:
             for move in self.board_all_possible_moves(td_idx=td_idx):
                 start_idx, end_idx = move
                 end_td_idx = end_idx[:2]
-                if end_td_idx in active_boards and end_td_idx != td_idx:
+                if end_td_idx in possible_boards and end_td_idx != td_idx:
                     edge_list[td_idx].add(end_td_idx)
                 else:
                     non_edges[td_idx].add(end_td_idx)
@@ -904,9 +905,9 @@ class Chess5d:
                 if equiv_class not in partition:
                     partition[equiv_class] = set()
                 partition[equiv_class].add(move)
-        for edges, used_sources,used_boards in all_DAG_subgraphs_with_property(edge_list=edge_list):
+        for edges, used_sources, used_boards in all_DAG_subgraphs_with_property(edge_list=edge_list):
             # we must also add moves from the non-edges
-            other_boards=active_boards.difference(used_sources)
+            other_boards = possible_boards.difference(used_sources)
             for i in range(len(other_boards) + 1):
                 for other_initial_boards in itertools.combinations(other_boards, i):
                     # other initial boards is a list of td_idxes
@@ -921,7 +922,7 @@ class Chess5d:
                         for move_list in itertools.product(*(partition[equiv_class] for equiv_class in order)):
                             yield move_list
 
-    def all_possible_turn_sets_bad(self, player=None):
+    def all_possible_turn_subsets_bad(self, player=None):
         seen = set()
         yield ()
         for moveset in itertools.product(*(self.board_all_possible_moves(td_idx=td_idx)
@@ -939,6 +940,68 @@ class Chess5d:
 
                     if tup not in seen:
                         yield tup
+                    seen.add(tup)
+
+    def all_possible_turn_sets(self, player=None):
+        """
+        returns all sets of moves that player can take in order to advance present
+        """
+
+        if player is None:
+            player = self.player_at(self.present())
+        sign = 2*player - 1  # direction of dimensions, 1 for black, -1 for white
+        possible_boards = set(self.players_boards_with_possible_moves(player=player))
+        possible_presents = set(self.boards_with_possible_moves())
+
+        for moves in self.all_possible_turn_subsets(player=player):
+            possible_gifts = possible_presents.copy()  # keep track of possible presents
+
+            dim_range = list(self.multiverse.get_range())
+            used_dims = set()
+
+            for (_, dim1, _, _), (time2, dim2, _, _) in moves:
+                used_dims.add(dim1)
+
+                if dim2 in used_dims or (time2, dim2) not in possible_boards:
+                    # here, we split
+                    dim_range[player] += sign
+                    possible_gifts.add((time2 + 1, dim_range[player]))
+                    used_dims.add(dim_range[player])
+                else:
+                    used_dims.add(dim2)
+            active_number = self.get_active_number(dim_range=dim_range)
+            present = min(time for time, dim in possible_gifts if abs(dim) <= active_number)
+            success = True
+            for time, dim in possible_boards:
+                if dim not in used_dims:
+                    if abs(dim) <= active_number:
+                        if time <= present:
+                            success = False
+                            break
+
+            if success:
+                yield moves
+
+    def all_possible_turn_sets_bad(self, player=None):
+        seen = set()
+        if self.player_at(self.present()) != player:
+            yield ()
+        for moveset in itertools.product(*(self.board_all_possible_moves(td_idx=td_idx)
+                                           for td_idx in self.players_boards_with_possible_moves(player=player))):
+            for order in itertools.permutations(moveset):
+                temp_game = self.clone()
+                seq = []
+                for move in order:
+                    if not temp_game.board_can_be_moved(move[0][:2]):
+                        break
+
+                    temp_game.make_move(move)
+                    seq.append(move)
+                    tup = tuple(seq)
+
+                    if tup not in seen:
+                        if temp_game.player_at(temp_game.present()) != player:
+                            yield tup
                     seen.add(tup)
 
     def no_moves(self, player=None):
@@ -1213,66 +1276,63 @@ class Chess2d(Chess5d):
 
 if __name__ == '__main__':
     game = Chess5d(save_moves=True, check_validity=True)
-    print(game)
-    print('present', game.present())
     print('capture', game.make_move(((0, 0, 1, 3), (0, 0, 3, 3))))
-    print()
-    print('present', game.present())
     print('capture', game.make_move(((1, 0, 6, 4), (1, 0, 4, 4))))
-    print()
-    print('present', game.present())
     print('capture', game.make_move(((2, 0, 0, 1), (0, 0, 2, 1))))
-    print()
-    print('present', game.present())
     print('capture', game.make_move(((1, -1, 6, 6), (1, -1, 5, 6))))
-    print()
-    print('present', game.present())
     print('capture', game.make_move(((2, -1, 1, 7), (2, -1, 2, 7))))
-    print()
-    print('present', game.present())
     print('capture', game.make_move(((3, 0, 6, 6), (3, -1, 6, 6))))
-    print()
-    print('present', game.present())
     print('capture', game.make_move(((4, -1, 2, 1), (4, 0, 4, 1))))
-    print()
-    print('present', game.present())
     print('capture', game.make_move(((5, 0, 4, 4), (5, -1, 4, 4))))
-    print()
-    print('present', game.present())
     print('capture', game.make_move(((6, 0, 4, 1), (6, -1, 4, 3))))
-    print()
-    print('present', game.present())
     print('capture', game.make_move(((7, -1, 7, 1), (7, 0, 5, 1))))
-    print()
-    print('present', game.present())
     print('capture', game.make_move(((8, -1, 0, 1), (8, 0, 2, 1))))
-    print()
-    print('present', game.present())
     print('capture', game.make_move(((9, 0, 5, 1), (9, -1, 7, 1))))
-    print()
-    print('present', game.present())
     print('capture', game.make_move(((10, 0, 2, 1), (10, -1, 0, 1))))
-    print()
-    print('present', game.present())
     print('capture', game.make_move(((11, 0, 7, 3), (11, 0, 3, 7))))
-    print()
-    print('present', game.present())
     print('capture', game.make_move(((11, -1, 7, 1), (11, -1, 5, 2))))
-    print()
-    print('present', game.present())
     print('capture', game.make_move(((12, -1, 4, 3), (8, -1, 4, 2))))
+    print('capture', game.make_move(((12, 0, 0, 6), (10, 0, 2, 6))))
+    print('capture', game.make_move(((13, 0, 3, 7), (1, 0, 3, 7))))
+    print('capture', game.make_move(((2, 1, 0, 1), (6, 0, 0, 1))))
     print()
     gameclone = game.clone()
-    for _ in range(10):
+    gameclone.undo_move()
+    for _ in range(19):
         game.undo_move()
-    print('game:')
-    print(game)
-    encode = (game.encoding())
-    game2 = Chess5d.decoding(encode)
-    print('decoded:')
-    print(game2)
-    assert (game == game2)
+        print('game:')
+        print(game)
+        encode = (game.encoding())
+        game2 = Chess5d.decoding(encode)
+        assert (game == game2)
 
+        print('length', len(game.move_history), 'history', game.move_history)
+
+        player = game.player_at(game.present())
+
+        thingy = list(game.all_possible_turn_subsets(player=player))
+        thingy2 = set(tuple(sorted(move)) for move in thingy)
+        thingy3 = list(game.all_possible_turn_sets(player=player))
+        thingy4 = set(tuple(sorted(move)) for move in thingy3)
+        print(len(thingy))
+        print('found subsets', len(thingy2))
+        print('actual sets', len(thingy4))
+
+        bad_thingy = list(game.all_possible_turn_subsets_bad(player=player))
+        bad_thingy2 = set(tuple(sorted(move)) for move in bad_thingy)
+
+        bad_thingy3 = list(game.all_possible_turn_sets_bad(player=player))
+        bad_thingy4 = set(tuple(sorted(move)) for move in bad_thingy3)
+
+        print()
+        print(len(bad_thingy))
+        print('found subsets', len(bad_thingy2))
+        print('actual sets', len(bad_thingy4))
+        assert (thingy2 == bad_thingy2)
+        assert (thingy4 == bad_thingy4)
+        # print((thingy4.difference(bad_thingy4)).pop())
+
+    quit()
     T = 4
     connections = (Chess5d.connections_of([T//2 for _ in range(4)], [T for _ in range(4)]))
     for idx in connections:
@@ -1281,17 +1341,3 @@ if __name__ == '__main__':
     print(T**4)
     idxs = (zip(*Chess5d.connections_of([T//2 for _ in range(4)], [T for _ in range(4)])))
     print(list(idxs))
-
-    print(game)
-
-    thingy = list(game.all_possible_turn_sets(player=0))
-    thingy2 = set(tuple(sorted(move)) for move in thingy)
-    bad_thingy = list(game.all_possible_turn_sets_bad(player=0))
-    bad_thingy2 = set(tuple(sorted(move)) for move in bad_thingy)
-
-    print(len(thingy))
-    print(len(thingy2))
-    print()
-    print(len(bad_thingy))
-    print(len(bad_thingy2))
-    assert(thingy2==bad_thingy2)
