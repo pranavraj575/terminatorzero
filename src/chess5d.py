@@ -470,13 +470,17 @@ class Chess5d:
             THE WAY TO TEST FOR CHECKMATE/STALEMATE SHOULD BE THE FOLLOWING:
                 if the current player cannot advance the present with any set of moves, stalemate
                 if the current player captures opponent king:
-                    IF on the opponents last turn, there was no possible sequence of moves to avoid this:
-                        stalemate
-                    OTHERWISE:
+                    IF on the opponents last turn, there was a king in check:
                         checkmate
+                    OTHERWISE:
+                        IF on the opponents last turn, there was no possible sequence of moves to avoid this:
+                            stalemate
+                        OTHERWISE:
+                            checkmate
+
             the reason we do this is because a 'stalemate test' is expensive
                 we have to check all possible sequences of opponent moves
-                thus, we do this check once at the end of the game to help runtime
+                thus, we do this check maybe once at the end of each game to help runtime
         """
         if multiverse is None:
             multiverse = Multiverse(
@@ -1292,9 +1296,9 @@ if __name__ == '__main__':
     print('capture', game.make_move(((11, 0, 7, 3), (11, 0, 3, 7))))
     print('capture', game.make_move(((11, -1, 7, 1), (11, -1, 5, 2))))
     print('capture', game.make_move(((12, -1, 4, 3), (8, -1, 4, 2))))
-    print('capture', game.make_move(((12, 0, 0, 6), (10, 0, 2, 6))))
-    print('capture', game.make_move(((13, 0, 3, 7), (1, 0, 3, 7))))
-    print('capture', game.make_move(((2, 1, 0, 1), (6, 0, 0, 1))))
+    # print('capture', game.make_move(((12, 0, 0, 6), (10, 0, 2, 6))))
+    # print('capture', game.make_move(((13, 0, 3, 7), (1, 0, 3, 7))))
+    # print('capture', game.make_move(((2, 1, 0, 1), (6, 0, 0, 1))))
     print()
     gameclone = game.clone()
     gameclone.undo_move()
