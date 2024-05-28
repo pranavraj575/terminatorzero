@@ -625,6 +625,33 @@ class Chess5d:
 
         return (move, self.get_piece(end_idx))
 
+    def undo_turn(self, player=None):
+        """
+        undoes entire turn of the specified player
+            if player is None, use last player moved
+
+        always results in END_TURN being the last thing on move history, unless move history is empty
+        """
+        if not self.move_history:
+            return
+        move = self.move_history[-1]
+        while move == END_TURN:
+            self.undo_move()
+            if not self.move_history:
+                return
+            move = self.move_history[-1]
+
+        start_idx, end_idx = move
+        if player is None:
+            player = self.player_at(time=start_idx[0])
+
+        while move != END_TURN and self.player_at(move[0][0]) == player:
+            self.undo_move()
+            if not self.move_history:
+                return
+            move = self.move_history[-1]
+        self.make_move(END_TURN)
+
     def get_board(self, td_idx):
         return self.multiverse.get_board(td_idx)
 
@@ -1351,8 +1378,7 @@ if __name__ == '__main__':
     while len(gameclone3.move_history) > len(gameclone2.move_history):
         gameclone3.undo_move()
     assert gameclone3 == gameclone2
-
-    for _ in range(19):
+    for _ in range(10):
         game.undo_move()
         print('game:')
         print(game)
