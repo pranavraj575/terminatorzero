@@ -374,6 +374,7 @@ class Multiverse:
         time_idx, dim_idx = td_idx
         if dim_idx == 0:
             self.main_timeline.append(board=board, time_idx=time_idx)
+            self.max_length = max(self.max_length, self.main_timeline.end_time() + 1)
             return
 
         if dim_idx > 0:
@@ -679,7 +680,7 @@ class Chess5d:
             if self.player_at(time=t) == player:
                 yield (t, d)
 
-    def piece_possible_moves(self, idx,castling=True):
+    def piece_possible_moves(self, idx, castling=True):
         """
         returns possible moves of piece at idx
         :param idx: (time, dim, i, j)
@@ -772,15 +773,15 @@ class Chess5d:
                             if works:
                                 yield (idx_time, idx_dim, idx_i, idx_j + 2*dir)
 
-    def board_all_possible_moves(self, td_idx,castling=False):
+    def board_all_possible_moves(self, td_idx, castling=True):
         t, d = td_idx
         board = self.get_board(td_idx)
         for (i, j) in board.pieces_of(self.player_at(t)):
             idx = (t, d, i, j)
-            for end_idx in self.piece_possible_moves(idx,castling=castling):
+            for end_idx in self.piece_possible_moves(idx, castling=castling):
                 yield idx, end_idx
 
-    def all_possible_moves(self, player=None,castling=False):
+    def all_possible_moves(self, player=None, castling=True):
         """
         returns an iterable of all possible moves of the specified player
         if player is None, uses the first player that needs to move
@@ -792,7 +793,7 @@ class Chess5d:
             # the player does not have to move
             yield END_TURN
         for td_idx in self.players_boards_with_possible_moves(player=player):
-            for move in self.board_all_possible_moves(td_idx=td_idx,castling=castling):
+            for move in self.board_all_possible_moves(td_idx=td_idx, castling=castling):
                 yield move
 
     def all_possible_movesets(self, player=None):
@@ -801,12 +802,13 @@ class Chess5d:
 
             if player is None, uses the first player that needs to move
             {} is included if the player does not NEED to move
+        this problem is equivalent to the following;
         """
         if player is None:
             player = self.player_at(self.present())
         raise NotImplementedError
 
-    def is_stalemate(self, player=None):
+    def no_moves(self, player=None):
         """
         returns if no possible moves
         if player is None, return player that has to move
@@ -860,7 +862,9 @@ class Chess5d:
             if time_travel is true, consider all possible opponent moves
             if false, only consider moves without time travel (i.e. on same board)
         """
-        for move in self.all_possible_moves(player=1 - player,castling=False):
+        # we do not want castling as you cannot capture a piece with that
+        # this also causes an infinite loop, as to check for castling, we must use this method
+        for move in self.all_possible_moves(player=1 - player, castling=False):
             if move is not END_TURN:
                 start_idx, end_idx = move
                 if time_travel == False and start_idx[:2] == end_idx[:2]:
@@ -996,9 +1000,9 @@ class Chess2d(Chess5d):
             save_moves=save_moves,
         )
 
-    def piece_possible_moves(self, idx):
+    def piece_possible_moves(self, idx, castling=True):
         # only return moves that do not jump time-dimensions
-        for end_idx in super().piece_possible_moves(idx):
+        for end_idx in super().piece_possible_moves(idx, castling=castling):
             if end_idx[:2] == idx[:2]:
                 yield end_idx
 
@@ -1060,11 +1064,11 @@ class Chess2d(Chess5d):
         return game
 
     def clone(self):
-        game = Chess2d(board=self.get_current_board().clone(),
-                       first_player=self.first_player,
+        game = Chess2d(
                        check_validity=self.check_validity,
                        save_moves=self.save_moves,
                        )
+        game.first_player=self.first_player
         game.multiverse = self.multiverse.clone()
         game.move_history = copy.deepcopy(self.move_history)
         game.dimension_spawn_history = copy.deepcopy(self.dimension_spawn_history)

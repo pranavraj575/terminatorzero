@@ -33,7 +33,7 @@ def outcome(player: Agent, opponent: Agent, game: Chess5d = None, first_player=0
             player_idx = 1 - player_idx
         else:
             captured = game.make_move(move)
-        if game.is_stalemate(player=player_idx):
+        if game.no_moves(player=player_idx):
             stalemate=True
             break
     if stalemate:

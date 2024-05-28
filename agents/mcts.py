@@ -221,6 +221,7 @@ def create_pvz_evaluator(policy_value_net):
 if __name__ == '__main__':
     from src.chess5d import Board, Chess2d, BOARD_SIZE, QUEEN, ROOK, as_player
     from src.utilitites import seed_all
+
     seed_all(1)
 
     easy_game = Chess2d(
@@ -231,18 +232,19 @@ if __name__ == '__main__':
     easy_game.check_validity = True
     evaluator = create_pvz_evaluator(policy_value_net=lambda enc, moves: (torch.rand(len(moves)), torch.zeros(1)))
     player = 0
-    for _ in range(20):
+    for _ in range(50):
         next_move, root = UCT_search(easy_game, player=player, num_reads=128, policy_value_evaluator=evaluator)
         for move, q, number in zip(root.next_moves, root.child_Q(), root.child_number_visits):
             print(move, q, number)
 
-        capture= easy_game.make_move(next_move)
+        capture = easy_game.make_move(next_move)
         if next_move is END_TURN:
             print("PLAYER SWAP")
             player = 1 - player
         else:
             print(next_move)
             print(easy_game)
-        if piece_id(capture)==KING:
+        if piece_id(capture) == KING:
             break
+    print(easy_game.multiverse)
     pass
