@@ -248,38 +248,172 @@ class Board:
 
 
 class Timeline:
-    def __init__(self, board_list=None, start_idx=0):
+    def __init__(self, board_list: [Board] = None, start_idx: int = 0):
         if board_list is None:
             board_list = []
         self.start_idx = start_idx
         self.board_list = board_list
-        
 
-class Present:
-    def __init__(self, board=None, up_list=None, down_list=None):
-        self.board = board
+    def is_empty(self):
+        return len(self.board_list) == 0
+
+    def clone(self):
+        return Timeline(
+            board_list=[board.clone() for board in self.board_list],
+            start_idx=self.start_idx,
+        )
+
+    def flip_timeline(self):
+        self.board_list = [board.flipped_board() for board in self.board_list]
+
+    def get_board(self, real_time: int):
+        """
+        gets board at time, where time is the 'real' index, relative to 0
+        """
+        if self.in_range(real_time=real_time):
+            return self.board_list[real_time - self.start_idx]
+        else:
+            return None
+
+    def get_time_range(self):
+        """
+        valid time range [start, end)
+        """
+        return (self.start_idx, self.start_idx + len(self.board_list))
+
+    def end_time(self):
+        """
+        last possible time
+        """
+        return self.start_idx + len(self.board_list) - 1
+
+    def in_range(self, real_time):
+        start, end = self.get_time_range()
+        return start <= real_time and real_time < end
+
+    def append(self, board: Board, time_idx=None):
+        # if not self.in_range(time_idx):
+        #    raise Exception("INVALID INDEX")
+        self.board_list.append(board)
+
+    def pop(self):
+        self.board_list.pop()
+
+    def __str__(self):
+        s = ''
+        interspace = len(str(self.end_time())) + 6
+
+        str_boards = [Board.empty_string()
+                      for _ in range(self.start_idx)] + [board.__str__()
+                                                         for board in self.board_list]
+        str_boards = [s.split('\n') for s in str_boards]
+        for row in range(2*BOARD_SIZE):
+            if row == BOARD_SIZE:
+                midstring = ''
+                for time in range(len(str_boards)):
+                    midtime = '   t' + str(time) + ': '
+                    while len(midtime) < interspace:
+                        midtime = ' ' + midtime
+                    midstring += midtime
+                    midstring += str_boards[time][row]
+
+                s += midstring
+            else:
+                s += (' '*interspace) + (' '*interspace).join([str_board[row] for str_board in str_boards])
+            s += '\n'
+        return s
+
+
+class Multiverse:
+    def __init__(self, main_timeline: Timeline, up_list: [Timeline] = None, down_list: [Timeline] = None):
+        self.main_timeline = main_timeline
         if up_list is None:
             up_list = []
         if down_list is None:
             down_list = []
         self.up_list = up_list
         self.down_list = down_list
+        self.max_length = None
+        self._set_max_length()
+
+    def _set_max_length(self):
+        self.max_length = self.main_timeline.end_time() + 1
+        for listt in self.up_list, self.down_list:
+            for timeline in listt:
+                self.max_length = max(self.max_length, timeline.end_time() + 1)
 
     def clone(self):
-        return Present(board=None if self.board is None else self.board.clone(),
-                       up_list=[None if board is None else board.clone() for board in self.up_list],
-                       down_list=[None if board is None else board.clone() for board in self.down_list],
-                       )
-
-    def flip_present(self):
-        if self.board is not None:
-            self.board = self.board.flipped_board()
-        self.up_list, self.down_list = (
-            [None if board is None else board.flipped_board() for board in self.down_list],
-            [None if board is None else board.flipped_board() for board in self.up_list]
+        return Multiverse(
+            main_timeline=self.main_timeline.clone(),
+            up_list=[None if timeline is None else timeline.clone() for timeline in self.up_list],
+            down_list=[None if timeline is None else timeline.clone() for timeline in self.down_list],
         )
 
-    def get_board(self, dim_idx) -> Board|None:
+    def flip_multiverse(self):
+        self.main_timeline.flip_timeline()
+        self.up_list, self.down_list = self.down_list, self.up_list
+        for listt in self.up_list, self.down_list:
+            for timeline in listt:
+                if timeline is not None:
+                    timeline.flip_timeline()
+
+    def get_board(self, td_idx) -> Board|None:
+        time_idx, dim_idx = td_idx
+        timeline = self.get_timeline(dim_idx=dim_idx)
+        if timeline is None:
+            return None
+        else:
+            return timeline.get_board(time_idx)
+
+    def add_board(self, td_idx, board):
+        """
+        adds board at specified td_idx
+        :param board:
+        :return:
+        """
+        time_idx, dim_idx = td_idx
+        if dim_idx == 0:
+            self.main_timeline.append(board=board, time_idx=time_idx)
+            return
+
+        if dim_idx > 0:
+            dim_idx, listt = dim_idx - 1, self.up_list
+        else:
+            dim_idx, listt = -dim_idx - 1, self.down_list
+
+        if dim_idx >= len(listt):
+            # this should only need to happen once
+            timeline = Timeline(start_idx=time_idx)
+            listt.append(timeline)
+        else:
+            timeline = listt[dim_idx]
+        timeline.append(board=board, time_idx=time_idx)
+        self.max_length = max(self.max_length, timeline.end_time() + 1)
+
+    def get_range(self):
+        """
+        returns range of indices (inclusive)
+        """
+        return (-len(self.down_list), len(self.up_list))
+
+    def in_range(self, dim):
+        bot, top = self.get_range()
+        return bot <= dim and dim <= top
+
+    def idx_exists(self, td_idx):
+        time, dim = td_idx
+        return self.in_range(dim) and self.get_timeline(dim).in_range(time)
+
+    def leaves(self):
+        """
+        where did you go
+        :return: coordinates of all final states
+        """
+        overall_range = self.get_range()
+        for dim_idx in range(overall_range[0], overall_range[1] + 1):
+            yield (self.get_timeline(dim_idx=dim_idx).end_time(), dim_idx)
+
+    def get_timeline(self, dim_idx) -> Timeline|None:
         if dim_idx > 0:
             dim_idx = dim_idx - 1
             if dim_idx < len(self.up_list):
@@ -293,83 +427,63 @@ class Present:
             else:
                 return None
         else:
-            return self.board
-
-    def add_board(self, dim_idx, board):
-        if dim_idx > 0:
-            dim_idx, listt = dim_idx - 1, self.up_list
-        elif dim_idx < 0:
-            dim_idx, listt = -dim_idx - 1, self.down_list
-        else:
-            self.board = board
-            return
-        while dim_idx >= len(listt):
-            listt.append(None)
-        listt[dim_idx] = board
-
-    def get_range(self):
-        """
-        returns range of indices (inclusive)
-        """
-        return (-len(self.down_list), len(self.up_list))
-
-    def is_empty(self):
-        return self.board is None and (self.get_range() == (0, 0))
-
-    def in_range(self, dim):
-        bot, top = self.get_range()
-        return bot <= dim and dim <= top
+            return self.main_timeline
 
     def remove_board(self, dim):
+        """
+        removes last board at specified dimension, removes timeline if no longer exists
+        """
         if self.in_range(dim):
             if dim > 0:
-                self.up_list[dim - 1] = None
-                while self.up_list and self.up_list[-1] is None:
+                self.up_list[dim - 1].pop()
+                while self.up_list and self.up_list[-1].is_empty():
                     self.up_list.pop()
             elif dim < 0:
-                self.down_list[-dim - 1] = None
-                while self.down_list and self.down_list[-1] is None:
+                self.down_list[-dim - 1].pop()
+                while self.down_list and self.down_list[-1].is_empty():
                     self.down_list.pop()
             else:
-                self.board = None
+                self.main_timeline.pop()
+            self._set_max_length()
 
     def __str__(self):
         s = ''
-        board_list = self.down_list[::-1] + [self.board] + self.up_list
-        str_boards = [Board.empty_string() if board is None else board.__str__()
-                      for board in board_list]
-        str_boards = [s.split('\n') for s in str_boards]
-        for row in range(2*BOARD_SIZE):
-            s += '\t'.join([str_board[row] for str_board in str_boards])
-            s += '\n'
+        overall_range = self.get_range()
+        for dim in range(overall_range[1], overall_range[0] - 1, -1):
+            timeline = self.get_timeline(dim_idx=dim)
+            s += 'dimension ' + str(dim) + ':\n'
+            s += timeline.__str__()
+            s += '\n\n'
         return s
 
 
 class Chess5d:
-    def __init__(self, present_list=None, first_player=0, check_validity=False, save_moves=True):
+    def __init__(self, multiverse=None, first_player=0, check_validity=False, save_moves=True):
         """
         implemented 5d chess
         :param first_player: which player plays on the first board, default 0 (white)
         :param check_validity: whether to run validity check on each move; default false
         :param save_moves: whether to save moves (useful for undoing moves); default True
         """
-        if present_list is None:
-            present_list = [
-                Present(board=
-                        Board(player=first_player)
+        if multiverse is None:
+            multiverse = Multiverse(
+                main_timeline=Timeline(
+                    board_list=[
+                        Board(
+                            player=first_player
                         )
-            ]
+                    ]
+                )
+            )
         self.check_validity = check_validity
         self.save_moves = save_moves
-        self.present_list = present_list
+        self.multiverse = multiverse
         self.first_player = first_player
-        self.overall_range = None
-        self._set_overall_range()
         self.move_history = []
         self.dimension_spawn_history = dict()
 
     def clone(self):
-        game = Chess5d(present_list=[present.clone() for present in self.present_list],
+        game = Chess5d(multiverse=self.multiverse.clone(),
                        first_player=self.first_player,
                        check_validity=self.check_validity,
                        save_moves=self.save_moves,
@@ -386,19 +500,10 @@ class Chess5d:
 
     def flip_game(self):
         self.first_player = 1 - self.first_player
-        for present in self.present_list:
-            present.flip_present()
+        self.multiverse.flip_multiverse()
         self.move_history = [self._flip_move(move) for move in self.move_history]
         self.dimension_spawn_history = {((time_idx, -dim_idx), self._flip_move(move)): -dim
                                         for ((time_idx, dim_idx), move), dim in self.dimension_spawn_history.items()}
-        self._set_overall_range()
-
-    def _set_overall_range(self):
-        overall_range = [0, 0]
-        for present in self.present_list:
-            rng = present.get_range()
-            overall_range = [min(overall_range[0], rng[0]), max(overall_range[1], rng[1])]
-        self.overall_range = overall_range
 
     def get_active_number(self):
         """
@@ -406,7 +511,8 @@ class Chess5d:
 
         i.e. if return is 5, any timeline at most 5 away is active
         """
-        return min(self.overall_range[1], -self.overall_range[0]) + 1
+        overall_range = self.multiverse.get_range()
+        return min(overall_range[1], -overall_range[0]) + 1
 
     def dim_is_active(self, dim):
         return abs(dim) <= self.get_active_number()
@@ -472,26 +578,19 @@ class Chess5d:
     def dimension_made_by(self, td_idx, move):
         return self.dimension_spawn_history[(td_idx, move)]
 
-    def undo_move(self, move=None):
+    def undo_move(self):
         """
-        undoes specified move, last move by default
+        undoes last move
         """
-        if move is None:
-            if self.move_history:
-                move = self.move_history[-1]
-            else:
-                print('WARNING: no moves to undo')
-                return
+        if self.move_history:
+            move = self.move_history[-1]
+        else:
+            print('WARNING: no moves to undo')
+            return
         if move is END_TURN:
             rindex = self.move_history[::-1].index(move)
-            self.move_history.pop(len(self.move_history) - 1 - rindex)
+            self.move_history.pop()
             return
-
-        def remove_board(td_idx):
-            time, dim = td_idx
-            self.present_list[time].remove_board(dim)
-            if self.present_list[time].is_empty():
-                self.present_list.pop(time)
 
         idx, end_idx = move
         if self.check_validity:
@@ -504,21 +603,17 @@ class Chess5d:
 
         # no matter what, a new board is created when the piece moves from the board at (time1, dim1)
         dim = self.dimension_made_by((time1, dim1), move)
-        remove_board((time1 + 1, dim))  # should be right after time1
+        self.multiverse.remove_board(dim)  # should be last board on dim, right after time1
 
         if (time1, dim1) != (time2, dim2):
             # if there is a time dimension jump, another board is created
             dim = self.dimension_made_by((time2, dim2), move)
-            remove_board((time2 + 1, dim))  # should be right after time2
+            self.multiverse.remove_board(dim)  # should be last board on dim, right after time2
 
-        self._set_overall_range()
-        self.move_history.remove(move)
+        self.move_history.pop()
 
     def get_board(self, td_idx):
-        time, dim = td_idx
-        if time < len(self.present_list):
-            board = self.present_list[time].get_board(dim)
-            return board
+        return self.multiverse.get_board(td_idx)
 
     def get_piece(self, idx):
         (time, dim, i, j) = idx
@@ -527,15 +622,10 @@ class Chess5d:
             return board.get_piece((i, j))
 
     def idx_exists(self, td_idx, ij_idx=(0, 0)) -> bool:
-        time, dim = td_idx
         i, j = ij_idx
         if i < 0 or j < 0 or i >= BOARD_SIZE or j >= BOARD_SIZE:
             return False
-        if time >= len(self.present_list) or time < 0:
-            return False
-        else:
-            board = self.get_board((time, dim))
-            return not (board is None)
+        return self.multiverse.idx_exists(td_idx=td_idx)
 
     def add_board_child(self, td_idx, board, move):
         """
@@ -554,19 +644,15 @@ class Chess5d:
             added_dim = False
         else:
             player = self.player_at(time=time)
+            overall_range = self.multiverse.get_range()
             if player == 0:  # white move
-                new_dim = self.overall_range[0] - 1
-                self.overall_range[0] -= 1
+                new_dim = overall_range[0] - 1
             else:  # black move
-                new_dim = self.overall_range[1] + 1
-                self.overall_range[1] += 1
+                new_dim = overall_range[1] + 1
             added_dim = True
-        if len(self.present_list) <= time + 1:
-            gift = Present()
-            gift.add_board(new_dim, board)
-            self.present_list.append(gift)
-        else:
-            self.present_list[time + 1].add_board(new_dim, board)
+
+        self.multiverse.add_board((time + 1, new_dim), board)
+
         if self.save_moves:
             self.dimension_spawn_history[(td_idx, move)] = new_dim
 
@@ -585,18 +671,15 @@ class Chess5d:
 
         equivalent to the leaves of the natural tree
         """
-        for t, present in enumerate(self.present_list):
-            rng = present.get_range()
-            for d in range(rng[0], rng[1] + 1):
-                if self.idx_exists((t, d)) and self.board_can_be_moved((t, d)):
-                    yield (t, d)
+        for td_idx in self.multiverse.leaves():
+            yield td_idx
 
     def players_boards_with_possible_moves(self, player):
         for (t, d) in self.boards_with_possible_moves():
             if self.player_at(time=t) == player:
                 yield (t, d)
 
-    def piece_possible_moves(self, idx):
+    def piece_possible_moves(self, idx,castling=True):
         """
         returns possible moves of piece at idx
         :param idx: (time, dim, i, j)
@@ -668,8 +751,9 @@ class Chess5d:
                     other_piece = self.get_piece((idx_time, idx_dim, idx_i, other_j))
                     if player_of(other_piece) != player_of(piece) and en_passantable(other_piece):
                         yield (idx_time, idx_dim, idx_i + dir, other_j)
+
         # castling check
-        if pid == KING and is_unmoved(piece):
+        if castling and pid == KING and is_unmoved(piece):
             for rook_i in (0, BOARD_SIZE - 1):
                 for rook_j in (0, BOARD_SIZE - 1):
                     # potential rook squares
@@ -688,15 +772,15 @@ class Chess5d:
                             if works:
                                 yield (idx_time, idx_dim, idx_i, idx_j + 2*dir)
 
-    def board_all_possible_moves(self, td_idx):
+    def board_all_possible_moves(self, td_idx,castling=False):
         t, d = td_idx
         board = self.get_board(td_idx)
         for (i, j) in board.pieces_of(self.player_at(t)):
             idx = (t, d, i, j)
-            for end_idx in self.piece_possible_moves(idx):
+            for end_idx in self.piece_possible_moves(idx,castling=castling):
                 yield idx, end_idx
 
-    def all_possible_moves(self, player=None):
+    def all_possible_moves(self, player=None,castling=False):
         """
         returns an iterable of all possible moves of the specified player
         if player is None, uses the first player that needs to move
@@ -708,7 +792,7 @@ class Chess5d:
             # the player does not have to move
             yield END_TURN
         for td_idx in self.players_boards_with_possible_moves(player=player):
-            for move in self.board_all_possible_moves(td_idx=td_idx):
+            for move in self.board_all_possible_moves(td_idx=td_idx,castling=castling):
                 yield move
 
     def all_possible_movesets(self, player=None):
@@ -776,7 +860,7 @@ class Chess5d:
             if time_travel is true, consider all possible opponent moves
             if false, only consider moves without time travel (i.e. on same board)
         """
-        for move in self.all_possible_moves(player=1 - player):
+        for move in self.all_possible_moves(player=1 - player,castling=False):
             if move is not END_TURN:
                 start_idx, end_idx = move
                 if time_travel == False and start_idx[:2] == end_idx[:2]:
@@ -807,25 +891,30 @@ class Chess5d:
         return min(t for (t, d) in self.boards_with_possible_moves() if self.dim_is_active(d))
 
     def encoding_shape(self):
-        dimensions = 1 + self.overall_range[1] - self.overall_range[0]
+        overall_range = self.multiverse.get_range()
+        dimensions = 1 + overall_range[1] - overall_range[0]
         I, J, board_channels = Board.encoding_shape()
-        return (len(self.present_list), dimensions, I, J, board_channels + 3)
+        return (self.multiverse.max_length, dimensions, I, J, board_channels + 3)
 
     def encoding(self):
         encoded = np.zeros(self.encoding_shape())
         I, J, board_channels = Board.encoding_shape()
-        dimensions_used_by_players = np.sign(self.overall_range[1] + self.overall_range[0])
+        overall_range = self.multiverse.get_range()
+        dimensions_used_by_players = np.sign(overall_range[1] + overall_range[0])
         # if negative, white used more dimensions, if postive, black used more dimensions, 0 if equal
         encoded[:, :, :, :, board_channels + 2] = dimensions_used_by_players
-        for time, present in enumerate(self.present_list):
-            for dim in range(self.overall_range[0], self.overall_range[1] + 1):
-                board = present.get_board(dim)
+
+        for dim in range(overall_range[0], overall_range[1] + 1):
+            timeline = self.multiverse.get_timeline(dim_idx=dim)
+            for time in range(self.multiverse.max_length):
+                board = self.get_board((time, dim))
 
                 if board is None:
                     board_encoding = Board.blocked_board_encoding()
                 else:
                     board_encoding = board.encoding()
-                idx_of_dim = dim - self.overall_range[0]  # since these must start at 0
+
+                idx_of_dim = dim - overall_range[0]  # since these must start at 0
                 encoded[time, idx_of_dim, :, :, :board_channels] = board_encoding
                 encoded[time, idx_of_dim, :, :, board_channels] = self.board_can_be_moved((time, dim))
                 encoded[time, idx_of_dim, :, :, board_channels + 1] = self.dim_is_active(dim)
@@ -834,7 +923,6 @@ class Chess5d:
 
     @staticmethod
     def decoding(array):
-        game = Chess5d(present_list=[])
         times, dims, *_ = array.shape
         *_, board_channels = Board.encoding_shape()
         dimensions_used_by_players = array[0, 0, 0, 0, board_channels + 2]
@@ -855,16 +943,28 @@ class Chess5d:
             center_range[1] -= 1
         d_0 = sum(center_range)//2
 
-        for time in range(times):
-            gift = Present()
-            for dim in range(dims):
-                dim_idx = dim - d_0
+        def get_timeline(dim):
+            board_list = []
+            start_time = 0
+
+            for time in range(times):
+                if Board.is_blocked(array[time, dim, :, :, :board_channels]):
+                    start_time += 1
+                else:
+                    break
+            for time in range(start_time, times):
                 board = Board.decoding(array[time, dim, :, :, :board_channels])
-                if board is not None:
-                    gift.add_board(dim_idx, board)
-            game.present_list.append(gift)
+                if board is None:
+                    break
+                board_list.append(board)
+            return Timeline(board_list=board_list, start_idx=start_time)
+
+        multiverse = Multiverse(main_timeline=get_timeline(dim=d_0),
+                                up_list=[get_timeline(dim) for dim in range(d_0 + 1, dims)],
+                                down_list=[get_timeline(dim) for dim in range(d_0 - 1, -1, -1)],
+                                )
+        game = Chess5d(multiverse=multiverse)
         game.player = game.get_board((0, 0)).player
-        game._set_overall_range()
         return game
 
     @staticmethod
@@ -880,34 +980,21 @@ class Chess5d:
         return np.array_equal(self.encoding(), other.encoding())
 
     def __str__(self):
-        s = ''
-        for t, present in enumerate(self.present_list):
-            str_boards = []
-            for dim in range(self.overall_range[0], self.overall_range[1] + 1):
-                bored = present.get_board(dim)
-                if bored is None:
-                    str_boards.append(Board.empty_string())
-                else:
-                    str_boards.append(bored.__str__())
-
-            str_boards = [s.split('\n') for s in str_boards]
-
-            s += 'time ' + str(t) + ':\n'
-
-            for row in range(2*BOARD_SIZE):
-                s += '\t'.join([str_board[row] for str_board in str_boards])
-                s += '\n'
-
-            s += '\n\n'
-        return s
+        return self.multiverse.__str__()
 
 
 class Chess2d(Chess5d):
-    def __init__(self, board=None, first_player=0):
-        present_list = None
+    def __init__(self, board=None, first_player=0, check_validity=False, save_moves=True):
+        multiverse = None
         if board is not None:
-            present_list = [Present(board=board)]
-        super().__init__(present_list=present_list, first_player=first_player)
+            first_player = board.player
+            multiverse = Multiverse(main_timeline=Timeline(board_list=[board]))
+        super().__init__(
+            multiverse=multiverse,
+            first_player=first_player,
+            check_validity=check_validity,
+            save_moves=save_moves,
+        )
 
     def piece_possible_moves(self, idx):
         # only return moves that do not jump time-dimensions
@@ -928,14 +1015,14 @@ class Chess2d(Chess5d):
         if len(idx) == 4:
             return super().make_move(move)
         else:
-            time = len(self.present_list) - 1
+            time = self.multiverse.max_length - 1
             dim = 0
             real_move = ((time, dim) + tuple(idx), (time, dim) + tuple(end_idx))
             return super().make_move(real_move)
 
     def play(self):
         while True:
-            print(self.present_list[-1].board)
+            print(self.__str__())
             moves = list(self.all_possible_moves())
             starters = list(set(idx for idx, _ in moves))
 
@@ -958,7 +1045,7 @@ class Chess2d(Chess5d):
                 break
 
     def get_current_board(self) -> Board:
-        return self.present_list[-1].board
+        return self.multiverse.get_board((self.multiverse.max_length - 1, 0))
 
     def encoding_shape(self):
         return Board.encoding_shape()
@@ -974,9 +1061,11 @@ class Chess2d(Chess5d):
 
     def clone(self):
         game = Chess2d(board=self.get_current_board().clone(),
-                       first_player=self.first_player
+                       first_player=self.first_player,
+                       check_validity=self.check_validity,
+                       save_moves=self.save_moves,
                        )
-        game.present_list = [present.clone() for present in self.present_list]
+        game.multiverse = self.multiverse.clone()
         game.move_history = copy.deepcopy(self.move_history)
         game.dimension_spawn_history = copy.deepcopy(self.dimension_spawn_history)
         return game
@@ -987,6 +1076,7 @@ class Chess2d(Chess5d):
 
 if __name__ == '__main__':
     game = Chess5d(save_moves=True, check_validity=True)
+    print(game)
     print('present', game.present())
     print('capture', game.make_move(((0, 0, 1, 3), (0, 0, 3, 3))))
     print()
@@ -1044,7 +1134,7 @@ if __name__ == '__main__':
     game2 = Chess5d.decoding(encode)
     print('decoded:')
     print(game2)
-    print(game == game2)
+    assert (game == game2)
 
     T = 4
     connections = (Chess5d.connections_of([T//2 for _ in range(4)], [T for _ in range(4)]))
