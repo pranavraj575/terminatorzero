@@ -6,13 +6,21 @@ PAWN = 'p'
 ROOK = 'r'
 KNIGHT = 'n'
 BISHOP = 'b'
-QUEEN = 'q'
+QUEEN = 'q'  # attacks on any number of diagonals
 KING = 'k'
+
+PRINCESS = 'c'  # combo of rook and bishop
+UNICORN = 'u'  # attacks on triagonls
+DRAGON = 'd'  # attacks on quadragonals
+BRAWN = 'b'  # beefy pawn, unimplemented (the en brasant and capturing is annoying)
+
+USING_PIECES = [ROOK, KNIGHT, BISHOP, QUEEN, KING, PAWN]
+
 EMPTY = ' '
 UNMOVED = '*'
 PASSANTABLE = '$'
 
-NUM_PIECES = 6
+NUM_PIECES = len(USING_PIECES)
 BOARD_SIZE = 8
 
 END_TURN = 'END_TURN'
@@ -164,7 +172,7 @@ class Board:
 
     def encoding(self):
         encoded = np.zeros(Board.encoding_shape())
-        encoder_dict = {ROOK: 0, KNIGHT: 1, BISHOP: 2, QUEEN: 3, KING: 4, PAWN: 5}
+        encoder_dict = {piece: i for (i, piece) in enumerate(USING_PIECES)}
 
         def piece_dimension(pid, player):
             return encoder_dict[pid] + NUM_PIECES*player
@@ -186,26 +194,11 @@ class Board:
 
                     encoded[i, j, k_0 + 1] = is_unmoved(piece)
                     encoded[i, j, k_0 + 2] = en_passantable(piece)
-
-                    # if pid == KING and is_unmoved(piece):
-                    #    kings_unmoved[player_of(piece)] = True
-
-                    # if pid == ROOK and is_unmoved(piece):
-                    #    if j == 0:
-                    #        left_rooks_unmoved[player_of(piece)] = True
-                    #    else:
-                    #        right_rooks_unmoved[player_of(piece)] = True
-
-        # kings_unmoved[0] and left_rooks_unmoved[0]
-        # kings_unmoved[0] and right_rooks_unmoved[0]
-
-        # kings_unmoved[1] and left_rooks_unmoved[1]
-        # kings_unmoved[1] and right_rooks_unmoved[1]
         return encoded
 
     @staticmethod
     def decoding(encoding):
-        piece_order = [ROOK, KNIGHT, BISHOP, QUEEN, KING, PAWN]
+        piece_order = USING_PIECES
 
         if Board.is_blocked(encoding):
             return None
@@ -730,11 +723,19 @@ class Chess5d:
         pid = piece_id(piece)
         q_k_dims = itertools.chain(*[itertools.combinations(range(4), k) for k in range(1, 5)])
 
-        if pid in (ROOK, BISHOP, QUEEN, KING):  # can move infinitely
+        if pid in (ROOK, BISHOP, QUEEN, KING, UNICORN, DRAGON, PRINCESS):  # easy linear moves
             if pid == ROOK:
                 dims_to_change = itertools.combinations(range(4), 1)
             elif pid == BISHOP:
                 dims_to_change = itertools.combinations(range(4), 2)
+            elif pid == UNICORN:
+                dims_to_change = itertools.combinations(range(4), 3)
+            elif pid == DRAGON:
+                dims_to_change = itertools.combinations(range(4), 4)
+            elif pid == PRINCESS:
+                # combo of rook and bishop
+                dims_to_change = itertools.chain(itertools.combinations(range(4), 1),
+                                                 itertools.combinations(range(4), 2))
             else:
                 dims_to_change = q_k_dims
             for dims in dims_to_change:

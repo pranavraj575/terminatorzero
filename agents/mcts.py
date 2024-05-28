@@ -113,15 +113,37 @@ class Node:
             # this returns the evaluation for parent.player
             # self.player == parent.player in this case, as an END_TURN was not played
             # thus, if the parent captured the king without stalemate, the parent won, and this will return 1
+            opponent=1-self.player
+            # however, we must do a stalemate check
+            temp_game.undo_turn(player=self.player)
+            # game now at the start of players move
+            temp_game.undo_turn(player=opponent)
+            # game now at start of opponents move
 
-            # however, we must do a stalemate check on the previous state
+            if temp_game.player_in_check(player=opponent):
+                # in this case, either we have checkmate
+                # or the opponent was in check and stayed in check
+                # either way, current player wins
+                return 1
+            else:
+                # in this case, the opponent did not start their turn in check
+                # this is the difficult case, we must test for stalemate
+                if temp_game.is_checkmate_or_stalemate(player=opponent):
+                    # there is no move that makes opponent avoid check, thus, this is stalemate
+                    # it cannot be checkmate since opponent is not in check
+                    return 0
+                else:
+                    # there was a moveset that took opponent out of check, but it was not played
+                    # thus opponent lost and player won
+                    return 1
+
+
             return 1
         # otherwise, this is a stalemate and thus a draw
         return 0
 
     def fully_expanded(self):
-        # we only need to check this as we will always go to an unexplored node if there is one available
-        return self.number_visits() >= len(self.next_moves)
+        return np.all(self.child_number_visits!=0)
 
     def expand(self, child_priors):
         self.is_expanded = True
@@ -234,7 +256,7 @@ if __name__ == '__main__':
     easy_game.check_validity = True
     evaluator = create_pvz_evaluator(policy_value_net=lambda enc, moves: (torch.rand(len(moves)), torch.zeros(1)))
     player = 0
-    for _ in range(50):
+    for _ in range(2):
         next_move, root = UCT_search(easy_game, player=player, num_reads=128, policy_value_evaluator=evaluator)
         for move, q, number in zip(root.next_moves, root.child_Q(), root.child_number_visits):
             print(move, q, number)
@@ -249,4 +271,26 @@ if __name__ == '__main__':
         if piece_id(capture) == KING:
             break
     print(easy_game.multiverse)
-    pass
+
+
+
+    stalemate = Chess2d(
+        board=Board(pieces=[[as_player(KING, 1)] + [EMPTY for _ in range(BOARD_SIZE - 1)]] +
+                           [[EMPTY for _ in range(BOARD_SIZE)] for _ in range(BOARD_SIZE - 4)] +
+                           [[EMPTY, as_player(QUEEN, 1)] + [EMPTY for _ in range(BOARD_SIZE - 2)]]+
+                           [[EMPTY for _ in range(BOARD_SIZE)]]+
+                           [[as_player(KING, 0)] + [EMPTY for _ in range(BOARD_SIZE - 1)]]
+                    ))
+
+    next_move, root = UCT_search(stalemate, player=0, num_reads=128, policy_value_evaluator=evaluator)
+    print(stalemate)
+    print(next_move)
+    root:Node
+    child=root.children[next_move].children[END_TURN]
+    child:Node
+    stalemate.make_move(next_move)
+    nexxxtmove=((1, 0, 5, 1), (1, 0, 6, 0))
+    grandchild=child.children[nexxxtmove]
+    stalemate.make_move(nexxxtmove)
+    grandchild:Node
+    print(grandchild.terminal_eval(stalemate))
