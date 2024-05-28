@@ -599,23 +599,18 @@ class Chess5d:
     def undo_move(self):
         """
         undoes last move
-        """
-        if self.move_history:
-            move = self.move_history[-1]
-        else:
-            print('WARNING: no moves to undo')
-            return
-        if move is END_TURN:
-            rindex = self.move_history[::-1].index(move)
-            self.move_history.pop()
-            return
 
+        returns move, caputure
+            (None, None) if no moves were made
+        """
+        if not self.move_history:
+            print('WARNING: no moves to undo')
+            return (None, None)
+        move = self.move_history.pop()
+        if move is END_TURN:
+            return (move, EMPTY)
         idx, end_idx = move
-        if self.check_validity:
-            if move not in self.move_history:
-                raise Exception("ERROR move " + str(idx) + ' -> ' + str(end_idx) + ' never was made')
-        if move != self.move_history[-1]:
-            print("WARNING: move", idx, '->', end_idx, 'was not the last move made')
+
         time1, dim1, i1, j1 = idx
         time2, dim2, i2, j2 = end_idx
 
@@ -628,7 +623,7 @@ class Chess5d:
             dim = self.dimension_made_by((time2, dim2), move)
             self.multiverse.remove_board(dim)  # should be last board on dim, right after time2
 
-        self.move_history.pop()
+        return (move, self.get_piece(end_idx))
 
     def get_board(self, td_idx):
         return self.multiverse.get_board(td_idx)
@@ -772,23 +767,31 @@ class Chess5d:
 
         # castling check
         if castling and pid == KING and is_unmoved(piece):
-            for rook_i in (0, BOARD_SIZE - 1):
-                for rook_j in (0, BOARD_SIZE - 1):
-                    # potential rook squares
-                    rook_maybe = self.get_piece((idx_time, idx_dim, rook_i, rook_j))
-                    if player_of(rook_maybe) == player_of(piece):
-                        if piece_id(rook_maybe) == ROOK and is_unmoved(rook_maybe):
-                            dir = np.sign(rook_j - idx_j)
-                            works = True
-                            for k in range(1, 3):
-                                idx_temp = (idx_time, idx_dim, rook_i, idx_j + dir*k)
-                                # NOTE: the game only checks if the square is dangerous for non-timetravling pieces
-                                if self.is_dangerous(player=player_of(piece), idx=idx_temp, time_travel=False):
-                                    works = False
-                                if player_of(self.get_piece(idx_temp)) is not None:
-                                    works = False
-                            if works:
-                                yield (idx_time, idx_dim, idx_i, idx_j + 2*dir)
+            # for rook_i in (0, BOARD_SIZE - 1):
+            rook_i = idx_i  # rook must be on same rank
+            for rook_j in (0, BOARD_SIZE - 1):
+                # potential rook squares
+                rook_maybe = self.get_piece((idx_time, idx_dim, rook_i, rook_j))
+                if player_of(rook_maybe) == player_of(piece):
+                    if piece_id(rook_maybe) == ROOK and is_unmoved(rook_maybe):
+                        dir = np.sign(rook_j - idx_j)
+                        works = True
+
+                        rook_dist = abs(rook_j - idx_j)
+                        # if there is a piece blocking a middle square, castling this way is bad
+                        if any(player_of(self.get_piece((idx_time, idx_dim, rook_i, idx_j + dir*k)))
+                               is not None for k in range(1, rook_dist)):
+                            continue
+
+                        king_hop_squares = {(idx_time, idx_dim, rook_i, idx_j + dir*k) for k in range(1, 3)}
+                        # if there is a piece attacking a square the king hops over
+                        # for some reason time travel is ignored
+                        for square in self.attacked_squares(player=1 - player_of(piece), time_travel=False):
+                            if square in king_hop_squares:
+                                works = False
+                                break
+                        if works:
+                            yield (idx_time, idx_dim, idx_i, idx_j + 2*dir)
 
     def board_all_possible_moves(self, td_idx, castling=True):
         t, d = td_idx
@@ -816,7 +819,6 @@ class Chess5d:
     def all_possible_turn_subsets(self, player=None):
         """
         returns an iterable of all possible turns subsets of the specified player
-
             if player is None, uses the first player that needs to move
 
         this problem is equivalent to the following:
@@ -1054,25 +1056,70 @@ class Chess5d:
                 if np.all(pos >= 0) and np.all(pos < boardsize):
                     yield tuple(pos)
 
-    def is_dangerous(self, player, idx, time_travel=True):
+    def attacked_squares(self, player, time_travel=True):
         """
-        returns if a square is dangerous for a player
-
-        this is sometimes implemented weirdly in the game,
-            if time_travel is true, consider all possible opponent moves
-            if false, only consider moves without time travel (i.e. on same board)
+        returns an iterable of all squares attacked by player (with repeats, as there is no fast way to filter these)
+        :param time_travel: whether or not to consider time travel (sometimes this is false for castling and stuff)
         """
         # we do not want castling as you cannot capture a piece with that
         # this also causes an infinite loop, as to check for castling, we must use this method
-        for move in self.all_possible_moves(player=1 - player, castling=False):
+        for move in self.all_possible_moves(player=player, castling=False):
             if move is not END_TURN:
                 start_idx, end_idx = move
                 if time_travel == False and start_idx[:2] == end_idx[:2]:
                     # in this case, we ignore since time travel is not considered
                     continue
-                if end_idx == idx:
-                    return True
+                yield end_idx
+
+    def player_in_check(self, player=None):
+        """
+        returns if player is in check
+            if player is None, uses currnet player
+
+        this simply iterates over all opponent attacked squares and returns if any of them are a king
+            this is consistent with the definition of check, as a capture of ANY opponent king is a win
+        """
+        if player is None:
+            player = self.player_at(self.present())
+
+        for idx in self.attacked_squares(player=1 - player):
+            if piece_id(self.get_piece(idx=idx)) == KING:
+                # if player_of(self.get_piece(idx=idx))==player
+                # this check is unnecessary, as opponent cannot move on top of their own king
+                return True
         return False
+
+    def is_checkmate_or_stalemate(self, player=None):
+        """
+        returns if it is (checkmate or stalemate) for specified player
+            if player is None, uses currnet player
+        checks if for all possible moves of the player, the player still ends up in check
+        """
+        if player is None:
+            player = self.player_at(self.present())
+
+        for moveset in self.all_possible_turn_sets(player=player):
+            # TODO: WE DO NEED TO PERMUTE, BUT IS THERE A WAY TO DO THIS LATER?
+            # FOR THE MOST PART, PERMUTATIONS SHOULD NOT HELP GETTING OUT OF CHECK
+
+            # for moves in itertools.permutations(moveset):
+            for moves in (moveset,):  # incorrect technically, for correctness use earlier line
+                temp_game = self.clone()
+                done = False
+                for move in moves:
+                    # if we are permuting, it is possible the permutation is invalid. in this case, we do not need to
+                    # inspect if the player is in check
+                    if temp_game.board_can_be_moved(move[0][:2]):
+                        temp_game.make_move(move)
+                    else:
+                        done = True
+                        break
+                if done:
+                    break
+                if not temp_game.player_in_check(player=player):
+                    # then there exists a sequence of moves that keeps the player out of check
+                    return False
+        return True
 
     def player_at(self, time=None):
         """
@@ -1109,7 +1156,6 @@ class Chess5d:
         encoded[:, :, :, :, board_channels + 2] = dimensions_used_by_players
 
         for dim in range(overall_range[0], overall_range[1] + 1):
-            timeline = self.multiverse.get_timeline(dim_idx=dim)
             for time in range(self.multiverse.max_length):
                 board = self.get_board((time, dim))
 
@@ -1280,9 +1326,11 @@ class Chess2d(Chess5d):
 
 if __name__ == '__main__':
     game = Chess5d(save_moves=True, check_validity=True)
+    gameclone = game.clone()
     print('capture', game.make_move(((0, 0, 1, 3), (0, 0, 3, 3))))
     print('capture', game.make_move(((1, 0, 6, 4), (1, 0, 4, 4))))
     print('capture', game.make_move(((2, 0, 0, 1), (0, 0, 2, 1))))
+    gameclone2 = game.clone()
     print('capture', game.make_move(((1, -1, 6, 6), (1, -1, 5, 6))))
     print('capture', game.make_move(((2, -1, 1, 7), (2, -1, 2, 7))))
     print('capture', game.make_move(((3, 0, 6, 6), (3, -1, 6, 6))))
@@ -1299,9 +1347,11 @@ if __name__ == '__main__':
     # print('capture', game.make_move(((12, 0, 0, 6), (10, 0, 2, 6))))
     # print('capture', game.make_move(((13, 0, 3, 7), (1, 0, 3, 7))))
     # print('capture', game.make_move(((2, 1, 0, 1), (6, 0, 0, 1))))
-    print()
-    gameclone = game.clone()
-    gameclone.undo_move()
+    gameclone3 = game.clone()
+    while len(gameclone3.move_history) > len(gameclone2.move_history):
+        gameclone3.undo_move()
+    assert gameclone3 == gameclone2
+
     for _ in range(19):
         game.undo_move()
         print('game:')

@@ -108,11 +108,13 @@ class Node:
     def is_terminal(self):
         return len(self.next_moves) == 0 or self.captured == KING
 
-    def terminal_eval(self):
+    def terminal_eval(self, temp_game):
         if self.captured == KING:
             # this returns the evaluation for parent.player
             # self.player == parent.player in this case, as an END_TURN was not played
-            # thus, if the parent captured the king, the parent won, and this will return 1
+            # thus, if the parent captured the king without stalemate, the parent won, and this will return 1
+
+            # however, we must do a stalemate check on the previous state
             return 1
         # otherwise, this is a stalemate and thus a draw
         return 0
@@ -187,7 +189,7 @@ def UCT_search(game: Chess5d, player, num_reads, policy_value_evaluator):
     for i in range(num_reads):
         leaf, game = root.select_leaf(game=root_game.clone())
         if leaf.is_terminal():
-            leaf.backup(value_estimate=leaf.terminal_eval())
+            leaf.backup(value_estimate=leaf.terminal_eval(temp_game=game))
         else:
             policy, value_estimate = policy_value_evaluator(
                 game=game,
