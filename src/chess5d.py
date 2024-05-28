@@ -465,6 +465,18 @@ class Chess5d:
         :param first_player: which player plays on the first board, default 0 (white)
         :param check_validity: whether to run validity check on each move; default false
         :param save_moves: whether to save moves (useful for undoing moves); default True
+
+        NOTE:
+            THE WAY TO TEST FOR CHECKMATE/STALEMATE SHOULD BE THE FOLLOWING:
+                if the current player cannot advance the present with any set of moves, stalemate
+                if the current player captures opponent king:
+                    IF on the opponents last turn, there was no possible sequence of moves to avoid this:
+                        stalemate
+                    OTHERWISE:
+                        checkmate
+            the reason we do this is because a 'stalemate test' is expensive
+                we have to check all possible sequences of opponent moves
+                thus, we do this check once at the end of the game to help runtime
         """
         if multiverse is None:
             multiverse = Multiverse(
@@ -796,17 +808,138 @@ class Chess5d:
             for move in self.board_all_possible_moves(td_idx=td_idx, castling=castling):
                 yield move
 
-    def all_possible_movesets(self, player=None):
+    def all_possible_turn_sets(self, player=None):
         """
-        returns an iterable of all possible sets of moves of the specified player
+        returns an iterable of all possible turns of the specified player (sets of moves that can be ordered to advance
+                            the present)
 
             if player is None, uses the first player that needs to move
             {} is included if the player does not NEED to move
-        this problem is equivalent to the following;
+
+        this problem is equivalent to the following:
+            consider the set of all possible moves, ignoring those that do not move to a currently active board
+                (i.e. ignore any moves that always spawn a new timeline)
+            break these into equivalence classes by their start/end dimensions
+            DAG subgraphs in this graph where each vertex is the source of at most one edge are exactly equivalent to
+                all subsets of moves that are possible. (we can additionally add back any of the ignored moves so that
+                    each board is the source of at most one move)
+
+            first, for any DAG subgraph of this type we can always do all of the moves
+                    this is true since we can topologically sort them then do them from the bottom up
+                    this works bc a move is impossible if the board it starts from has already been moved to
+                    since we are going backwards through the DAG, each starting board cannot have been moved to
+            additionally, we can add any subset of the ignored moves to this set of moves and have the same property
+                    this is true since we can just do all the ignored moves first.
+                        since no ignored move ends at a potential 'starting' board, this will not interfere with anything
+            Thus, the moves corresponding to a DAG subgraph of the graph where each vertex is the source of one edge
+                unioned with any of the ignored moves is a valid set of moves
+
+            for the other direction, consider a valid set of moves. Since they are valid, they must have some order
+                that allows them to be valid in the game
+            This order corresponds to a topological sort of the edges in our constructed directed graph. This proves
+                that the graph is a DAG since in the game, a board that is the end of a move cannot start a new move
+                additionally, each vertex is the source of exactly one edge, as there is only one move per board
+
+        NOTE: it is not true that the result of a set of moves are independent of the order
+            if we spawn two new timelines, the order we did the moves determines the numbers of the timelines
+            thus, order does matter for the result of the moves
+
+        Thus, for this method, we eventually have to check all possible permutations of these edges
+
+        NOTE: THIS IS ONLY NEEDED TO CALL ONCE PER GAME AS A STALEMATE CHECK,
+            TO CHECK IF A CAPTURE OF A KING COULD HAVE BEEN AVOIDED
+
+            PLAYING THE GAME LIKE THIS WILL BE BETTER FOR RUNTIME
         """
+
+        def all_DAG_subgraphs_with_property(edge_list: dict, used_sources=None, used_vertices=None):
+            """
+            iterable of all lists of edges that create a DAG such that each vertex is the source of at most one edge
+                (we run through all permutations, sort of wasteful)
+            the order returned will be in reverse topological order (the correct traversal)
+
+            :param edge_list: dict(vertex -> vertex set), must be copyable
+            :return: iterable of (list[(start vertex, end vertex)], used vertices)
+            """
+            if used_sources is None:
+                used_sources = set()
+            if used_vertices is None:
+                used_vertices = set()
+            yield (), used_sources, used_vertices
+            for source in edge_list:
+                if source not in used_vertices:
+                    for end in edge_list[source]:
+                        for (subsub, all_source,all_used) in all_DAG_subgraphs_with_property(edge_list=edge_list,
+                                                                                  used_sources=
+                                                                                  used_sources.union({source}),
+                                                                                  used_vertices=
+                                                                                  used_vertices.union({source, end}),
+                                                                                  ):
+                            yield (((source, end),) + subsub,
+                                   all_source,all_used)
+
         if player is None:
             player = self.player_at(self.present())
-        raise NotImplementedError
+
+        # we will make a graph as in the description
+        # this does not change theoretic runtime, but will in practice probably help a lot
+
+        active_boards = set(self.players_boards_with_possible_moves(player=player))
+
+        # this will be a list of lists
+        # all moves on each board playable board
+        partition = dict()  # partitions all moves by start, end board
+        edge_list = {td_idx: set() for td_idx in
+                     active_boards}  # edges we care about, just the edges between active boards
+        non_edges = {td_idx: set() for td_idx in active_boards}  # other moves, active -> inactive boards
+        for td_idx in active_boards:
+            for move in self.board_all_possible_moves(td_idx=td_idx):
+                start_idx, end_idx = move
+                end_td_idx = end_idx[:2]
+                if end_td_idx in active_boards and end_td_idx != td_idx:
+                    edge_list[td_idx].add(end_td_idx)
+                else:
+                    non_edges[td_idx].add(end_td_idx)
+                equiv_class = (td_idx, end_td_idx)
+                if equiv_class not in partition:
+                    partition[equiv_class] = set()
+                partition[equiv_class].add(move)
+        for edges, used_sources,used_boards in all_DAG_subgraphs_with_property(edge_list=edge_list):
+            # we must also add moves from the non-edges
+            other_boards=active_boards.difference(used_sources)
+            for i in range(len(other_boards) + 1):
+                for other_initial_boards in itertools.combinations(other_boards, i):
+                    # other initial boards is a list of td_idxes
+                    for other_final_boards in itertools.product(
+                            *(non_edges[td_idx] for td_idx in other_initial_boards)):
+                        other_edges = tuple(zip(other_initial_boards, other_final_boards))
+                        # this is now a list of (td_idx start, td_idx end)
+
+                        # this is now a list of (td_idx start, td_idx end) in correct order
+                        order = other_edges + edges
+                        # we will now choose moves of each class, and send them out
+                        for move_list in itertools.product(*(partition[equiv_class] for equiv_class in order)):
+                            yield move_list
+
+    def all_possible_turn_sets_bad(self, player=None):
+        seen = set()
+        yield ()
+        for moveset in itertools.product(*(self.board_all_possible_moves(td_idx=td_idx)
+                                           for td_idx in self.players_boards_with_possible_moves(player=player))):
+            for order in itertools.permutations(moveset):
+                temp_game = self.clone()
+                seq = []
+                for move in order:
+                    if not temp_game.board_can_be_moved(move[0][:2]):
+                        break
+
+                    temp_game.make_move(move)
+                    seq.append(move)
+                    tup = tuple(seq)
+
+                    if tup not in seen:
+                        yield tup
+                    seen.add(tup)
 
     def no_moves(self, player=None):
         """
@@ -1065,10 +1198,10 @@ class Chess2d(Chess5d):
 
     def clone(self):
         game = Chess2d(
-                       check_validity=self.check_validity,
-                       save_moves=self.save_moves,
-                       )
-        game.first_player=self.first_player
+            check_validity=self.check_validity,
+            save_moves=self.save_moves,
+        )
+        game.first_player = self.first_player
         game.multiverse = self.multiverse.clone()
         game.move_history = copy.deepcopy(self.move_history)
         game.dimension_spawn_history = copy.deepcopy(self.dimension_spawn_history)
@@ -1148,3 +1281,17 @@ if __name__ == '__main__':
     print(T**4)
     idxs = (zip(*Chess5d.connections_of([T//2 for _ in range(4)], [T for _ in range(4)])))
     print(list(idxs))
+
+    print(game)
+
+    thingy = list(game.all_possible_turn_sets(player=0))
+    thingy2 = set(tuple(sorted(move)) for move in thingy)
+    bad_thingy = list(game.all_possible_turn_sets_bad(player=0))
+    bad_thingy2 = set(tuple(sorted(move)) for move in bad_thingy)
+
+    print(len(thingy))
+    print(len(thingy2))
+    print()
+    print(len(bad_thingy))
+    print(len(bad_thingy2))
+    assert(thingy2==bad_thingy2)
