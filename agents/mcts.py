@@ -184,12 +184,12 @@ def UCT_search(game: Chess5d, player, num_reads, policy_value_evaluator):
     if root.is_terminal():
         return None, root
     for i in range(num_reads):
-        leaf, game = root.select_leaf(game=root_game.clone())
+        leaf, leaf_game = root.select_leaf(game=root_game.clone())
         if leaf.is_terminal():
-            leaf.backup(value_estimate=leaf.terminal_eval(temp_game=game))
+            leaf.backup(value_estimate=leaf.terminal_eval(temp_game=leaf_game))
         else:
             policy, value_estimate = policy_value_evaluator(
-                game=game,
+                game=leaf_game,
                 player=leaf.player,
                 moves=leaf.next_moves,
             )
@@ -203,9 +203,9 @@ def create_pvz_evaluator(policy_value_net):
     creates a function to evaluate the game for a given player
     :param policy_value_net: (game encoding, moves) -> (policy, value)
         only works for white
-    :return: (game, player) -> (policy,value)
-        assumes player is the one whose move it is
+    :return: (game, player, moves) -> (policy, value)
         returns the evaluation and policy for player
+        policy is a np array, value is a scalar
     """
 
     def pvz(game: Chess5d, player, moves):
@@ -225,37 +225,44 @@ class MCTSAgent(Agent):
         would expect this does not go well
     """
 
-    def __init__(self, num_reads=1000):
+    def __init__(self, num_reads=1000, playout_agent=None, draw_moves=float('inf')):
+        """
+        :param draw_moves: sent to the rollout agent
+            number of moves without capture before a draw is declared
+        """
         super().__init__()
         self.num_reads = num_reads
-        self.playout_agent = Randy()
+        if playout_agent is None:
+            playout_agent = Randy()
+        self.playout_agent = playout_agent
+        self.draw_moves = draw_moves
 
     def pick_move(self, game: Chess5d, player):
-        UCT_search(game=game,
-                   player=player,
-                   num_reads=self.num_reads,
-                   policy_value_evaluator=create_pvz_evaluator(
-                       policy_value_net=self.policy_value
-                   ),
-                   )
+        move, _ = UCT_search(game=game,
+                             player=player,
+                             num_reads=self.num_reads,
+                             policy_value_evaluator=self.policy_value_eval,
+                             )
+        return move
 
-    def policy_value(self, game: Chess5d, player, moves):
+    def policy_value_eval(self, game, player, moves):
         """
         returns the value of a game for specified player
 
         does this through random playout
         """
-        policy = (99 + torch.rand(len(moves)))/100
-        outcome = game_outcome(
+        policy = (99 + np.random.random(len(moves)))/100
+        outcome, game = game_outcome(
             player=self.playout_agent,
             opponent=self.playout_agent,
             game=game,
             first_player=player,
+            draw_moves=self.draw_moves,
         )
         if player == 1:
             # flip the value in this case
             outcome = -outcome
-        return policy, torch.tensor([outcome])
+        return policy, outcome
 
 
 if __name__ == '__main__':
@@ -268,26 +275,14 @@ if __name__ == '__main__':
         board=Board(pieces=[[as_player(KING, 0), as_player(QUEEN, 0)] + [EMPTY for _ in range(BOARD_SIZE - 2)]] +
                            [[EMPTY for _ in range(BOARD_SIZE)] for _ in range(BOARD_SIZE - 2)] +
                            [[as_player(KING, 1)] + [EMPTY for _ in range(BOARD_SIZE - 1)]]
-                    ))
-    easy_game.check_validity = True
-    evaluator = create_pvz_evaluator(policy_value_net=lambda enc, moves: (torch.rand(len(moves)), torch.zeros(1)))
-    player = 0
-    for _ in range(20):
-        next_move, root = UCT_search(easy_game, player=player, num_reads=128, policy_value_evaluator=evaluator)
-        for move, q, number in zip(root.next_moves, root.child_Q(), root.child_number_visits):
-            print(move, q, number)
+                    ),
+        check_validity=True
+    )
 
-        capture = easy_game.make_move(next_move)
-        if next_move is END_TURN:
-            print("PLAYER SWAP")
-            player = 1 - player
-        else:
-            print(next_move)
-            print(easy_game)
-        if piece_id(capture) == KING:
-            break
-    print(easy_game.multiverse)
-
+    agent = MCTSAgent(num_reads=128, draw_moves=50)
+    outcome, game = game_outcome(agent, agent, game=easy_game.clone(), draw_moves=50)
+    print(game.multiverse)
+    quit()
     stalemate = Chess2d(
         board=Board(pieces=[[as_player(KING, 1)] + [EMPTY for _ in range(BOARD_SIZE - 1)]] +
                            [[EMPTY for _ in range(BOARD_SIZE)] for _ in range(BOARD_SIZE - 4)] +

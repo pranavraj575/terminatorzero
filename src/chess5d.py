@@ -674,12 +674,12 @@ class Chess5d:
         returns (player specified, iterable of (move, captured piece) in correct order)
         """
         if not self.move_history:
-            return
+            return None, None
         move = self.move_history[-1]
         while move == END_TURN:
             self.undo_move()
             if not self.move_history:
-                return
+                return None, None
             move = self.move_history[-1]
 
         turn_history = []
@@ -695,7 +695,7 @@ class Chess5d:
             move = self.move_history[-1]
         if not move == END_TURN:
             self.make_move(END_TURN)
-        return tuple(turn_history[::-1])  # reverse the history, since we put the moves on in reversed order
+        return player, tuple(turn_history[::-1])  # reverse the history, since we put the moves on in reversed order
 
     def get_board(self, td_idx):
         return self.multiverse.get_board(td_idx)

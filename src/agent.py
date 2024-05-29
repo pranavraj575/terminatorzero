@@ -13,7 +13,12 @@ class Agent:
         raise NotImplementedError
 
 
-def game_outcome(player: Agent, opponent: Agent, game: Chess5d = None, first_player=0, draw_moves=float('inf')):
+def game_outcome(player: Agent,
+                 opponent: Agent,
+                 game: Chess5d = None,
+                 first_player=0,
+                 draw_moves=float('inf'),
+                 ) -> (int, Chess5d):
     """
     plays through a game and returns outcome (1 if white (player) won, 0 if draw, -1 if black (opponent) won)
     :param game: initial game, if None, initalizes a default game
@@ -43,7 +48,7 @@ def game_outcome(player: Agent, opponent: Agent, game: Chess5d = None, first_pla
             bored += 1
 
         if bored >= draw_moves:
-            return 0
+            return 0, game
     # game is now terminal, either player has no moves left, or king was captured
     out = game.clone().terminal_eval()
     return out, game

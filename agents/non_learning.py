@@ -56,8 +56,8 @@ if __name__ == '__main__':
     from src.chess5d import Chess2d
 
     seed_all(1)
-    winner, game = game_outcome(FastGuy(), FastGuy())
-    print(game)
+    winner, game = game_outcome(FastGuy(), FastGuy(), Chess2d(), draw_moves=100)
+    print(game.multiverse)
     for move in (game.move_history):
         print(move)
     print(winner)
