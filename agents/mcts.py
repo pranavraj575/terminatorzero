@@ -256,7 +256,7 @@ if __name__ == '__main__':
     easy_game.check_validity = True
     evaluator = create_pvz_evaluator(policy_value_net=lambda enc, moves: (torch.rand(len(moves)), torch.zeros(1)))
     player = 0
-    for _ in range(2):
+    for _ in range(20):
         next_move, root = UCT_search(easy_game, player=player, num_reads=128, policy_value_evaluator=evaluator)
         for move, q, number in zip(root.next_moves, root.child_Q(), root.child_number_visits):
             print(move, q, number)

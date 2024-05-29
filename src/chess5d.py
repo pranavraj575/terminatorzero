@@ -16,6 +16,8 @@ BRAWN = 'b'  # beefy pawn, unimplemented (the en brasant and capturing is annoyi
 
 USING_PIECES = [ROOK, KNIGHT, BISHOP, QUEEN, KING, PAWN]
 
+PROMOTION = QUEEN
+
 EMPTY = ' '
 UNMOVED = '*'
 PASSANTABLE = '$'
@@ -61,7 +63,7 @@ def get_moved_piece(piece, idx=(-1, None, -1, -1), end_idx=(-1, None, -1, -1)):
     piece = piece[0]  # since it moved
     if piece_id(piece) == PAWN and (i1 > -1):
         if i2 == BOARD_SIZE - 1 or i2 == 0:
-            piece = as_player(QUEEN, player_of(piece))
+            piece = as_player(PROMOTION, player_of(piece))
         if abs(i1 - i2) == 2:
             piece = piece + PASSANTABLE
     return piece
@@ -220,6 +222,13 @@ class Board:
                 pieces[i][j] = piece
         return Board(pieces=pieces, player=int(encoding[0, 0, k_0]))
 
+    def compressed(self):
+        return self.encoding()
+
+    @staticmethod
+    def decompress(compression):
+        return Board.decoding(compression)
+
     def __str__(self):
         s = ''
         for row in self.board[::-1]:
@@ -291,6 +300,18 @@ class Timeline:
 
     def pop(self):
         self.board_list.pop()
+
+    def compressed(self):
+        return (
+            self.start_idx,
+            tuple(board.compressed() for board in self.board_list),
+        )
+
+    @staticmethod
+    def decompress(compression):
+        start_idx, compressed_board_list = compression
+        board_list = [Board.decompress(compressed_board) for compressed_board in compressed_board_list]
+        return Timeline(board_list=board_list, start_idx=start_idx)
 
     def __str__(self):
         s = ''
@@ -440,6 +461,22 @@ class Multiverse:
                 self.main_timeline.pop()
             self._set_max_length()
 
+    def compressed(self):
+        return (
+            self.main_timeline.compressed(),
+            tuple(timeline.compressed() for timeline in self.up_list),
+            tuple(timeline.compressed() for timeline in self.down_list),
+        )
+
+    @staticmethod
+    def decompress(compression):
+        compressed_main, compressed_up_list, compressed_down_list = compression
+        return Multiverse(
+            main_timeline=Timeline.decompress(compressed_main),
+            up_list=[Timeline.decompress(comp_down) for comp_down in compressed_up_list],
+            down_list=[Timeline.decompress(comp_down) for comp_down in compressed_down_list],
+        )
+
     def __str__(self):
         s = ''
         overall_range = self.get_range()
@@ -452,9 +489,21 @@ class Multiverse:
 
 
 class Chess5d:
-    def __init__(self, multiverse=None, first_player=0, check_validity=False, save_moves=True):
+    def __init__(self,
+                 initial_multiverse=None,
+                 initial_timeline=None,
+                 initial_board=None,
+                 first_player=0,
+                 check_validity=False,
+                 save_moves=True):
         """
         implemented 5d chess
+        tries to initalize like this:
+            if initial_multiverse exists, uses this
+            if intial_timeline exists, makes a multiverse with just this timeline
+            if initial_board exists, makes a timeline with jsut this board
+            otherwise, default board
+
         :param first_player: which player plays on the first board, default 0 (white)
         :param check_validity: whether to run validity check on each move; default false
         :param save_moves: whether to save moves (useful for undoing moves); default True
@@ -475,25 +524,21 @@ class Chess5d:
                 we have to check all possible sequences of opponent moves
                 thus, we do this check maybe once at the end of each game to help runtime
         """
-        if multiverse is None:
-            multiverse = Multiverse(
-                main_timeline=Timeline(
-                    board_list=[
-                        Board(
-                            player=first_player
-                        )
-                    ]
-                )
-            )
+        if initial_multiverse is None:
+            if initial_timeline is None:
+                if initial_board is None:
+                    initial_board = Board(player=first_player)
+                initial_timeline = Timeline(board_list=[initial_board])
+            initial_multiverse = Multiverse(main_timeline=initial_timeline)
         self.check_validity = check_validity
         self.save_moves = save_moves
-        self.multiverse = multiverse
+        self.multiverse = initial_multiverse
         self.first_player = first_player
         self.move_history = []
         self.dimension_spawn_history = dict()
 
     def clone(self):
-        game = Chess5d(multiverse=self.multiverse.clone(),
+        game = Chess5d(initial_multiverse=self.multiverse.clone(),
                        first_player=self.first_player,
                        check_validity=self.check_validity,
                        save_moves=self.save_moves,
@@ -1169,6 +1214,27 @@ class Chess5d:
         """
         return min(t for (t, d) in self.boards_with_possible_moves() if self.dim_is_active(d))
 
+    def compressed(self):
+        """
+        space efficient representation
+        """
+        game = self.clone()
+        while game.move_history:
+            game.undo_move()
+        return (
+            self.first_player,
+            copy.deepcopy(self.move_history),
+            game.multiverse.compressed()
+        )
+
+    @staticmethod
+    def decompress(compression):
+        first_player, moves, compressed_multiverse = compression
+        game = Chess5d(initial_multiverse=Multiverse.decompress(compressed_multiverse), first_player=first_player)
+        for move in moves:
+            game.make_move(move)
+        return game
+
     def encoding_shape(self):
         overall_range = self.multiverse.get_range()
         dimensions = 1 + overall_range[1] - overall_range[0]
@@ -1241,7 +1307,7 @@ class Chess5d:
                                 up_list=[get_timeline(dim) for dim in range(d_0 + 1, dims)],
                                 down_list=[get_timeline(dim) for dim in range(d_0 - 1, -1, -1)],
                                 )
-        game = Chess5d(multiverse=multiverse)
+        game = Chess5d(initial_multiverse=multiverse)
         game.player = game.get_board((0, 0)).player
         return game
 
@@ -1263,12 +1329,10 @@ class Chess5d:
 
 class Chess2d(Chess5d):
     def __init__(self, board=None, first_player=0, check_validity=False, save_moves=True):
-        multiverse = None
         if board is not None:
             first_player = board.player
-            multiverse = Multiverse(main_timeline=Timeline(board_list=[board]))
         super().__init__(
-            multiverse=multiverse,
+            initial_board=board,
             first_player=first_player,
             check_validity=check_validity,
             save_moves=save_moves,
@@ -1385,7 +1449,11 @@ if __name__ == '__main__':
         print(game)
         encode = (game.encoding())
         game2 = Chess5d.decoding(encode)
+        compression = game.compressed()
+        game3 = Chess5d.decompress(compression)
+
         assert (game == game2)
+        assert (game2 == game3)
 
         print('length', len(game.move_history), 'history', game.move_history)
 
