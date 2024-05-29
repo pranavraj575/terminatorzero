@@ -13,35 +13,37 @@ class Agent:
         raise NotImplementedError
 
 
-def outcome(player: Agent, opponent: Agent, game: Chess5d = None, first_player=0):
+def game_outcome(player: Agent, opponent: Agent, game: Chess5d = None, first_player=0, draw_moves=float('inf')):
     """
-    plays through a game and returns outcome (1 if player 1 won, 0 if draw, -1 if player 2 won)
+    plays through a game and returns outcome (1 if white (player) won, 0 if draw, -1 if black (opponent) won)
     :param game: initial game, if None, initalizes a default game
+    :param draw_moves: if this number of moves go by without a capture, returns a draw
     :return: (outcome, resulting game)
     """
     if game is None:
         game = Chess5d()
     player_idx = first_player
 
-    stalemate=False
     captured = EMPTY
-    #while captured == EMPTY:
-    while piece_id(captured)!=KING:
+    # while captured == EMPTY:
+    bored = 0
+    while piece_id(captured) != KING:
+        if game.no_moves(player=player_idx):
+            break
         current_player = (player, opponent)[player_idx]
         move = current_player.pick_move(game, player_idx)
-        if move is None:
+        if move is END_TURN:
             player_idx = 1 - player_idx
         else:
             captured = game.make_move(move)
-        if game.no_moves(player=player_idx):
-            stalemate=True
-            break
-    if stalemate:
-        out=0
-    else:
-        # the current player won, as they just captured the king
-        if player_idx==1:
-            out=1
+
+        if captured != EMPTY:
+            bored = 0
         else:
-            out=-1
+            bored += 1
+
+        if bored >= draw_moves:
+            return 0
+    # game is now terminal, either player has no moves left, or king was captured
+    out = game.clone().terminal_eval()
     return out, game

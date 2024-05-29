@@ -223,11 +223,13 @@ class Board:
         return Board(pieces=pieces, player=int(encoding[0, 0, k_0]))
 
     def compressed(self):
-        return self.encoding()
+        return (self.player, '\n'.join(['\t'.join(row) for row in self.board]))
 
     @staticmethod
     def decompress(compression):
-        return Board.decoding(compression)
+        player, board_compression = compression
+        board = [row.split('\t') for row in board_compression.split('\n')]
+        return Board(pieces=board, player=player)
 
     def __str__(self):
         s = ''
@@ -669,6 +671,7 @@ class Chess5d:
             if player is None, use last player moved
 
         always results in END_TURN being the last thing on move history, unless move history is empty
+        returns (player specified, iterable of (move, captured piece) in correct order)
         """
         if not self.move_history:
             return
@@ -679,16 +682,20 @@ class Chess5d:
                 return
             move = self.move_history[-1]
 
+        turn_history = []
+
         start_idx, end_idx = move
         if player is None:
             player = self.player_at(time=start_idx[0])
 
         while move != END_TURN and self.player_at(move[0][0]) == player:
-            self.undo_move()
+            turn_history.append(self.undo_move())
             if not self.move_history:
                 return
             move = self.move_history[-1]
-        self.make_move(END_TURN)
+        if not move == END_TURN:
+            self.make_move(END_TURN)
+        return tuple(turn_history[::-1])  # reverse the history, since we put the moves on in reversed order
 
     def get_board(self, td_idx):
         return self.multiverse.get_board(td_idx)
@@ -719,7 +726,6 @@ class Chess5d:
         if not self.idx_exists((time + 1, dim)):
             # in this case dimension does not change
             new_dim = dim
-            added_dim = False
         else:
             player = self.player_at(time=time)
             overall_range = self.multiverse.get_range()
@@ -727,7 +733,6 @@ class Chess5d:
                 new_dim = overall_range[0] - 1
             else:  # black move
                 new_dim = overall_range[1] + 1
-            added_dim = True
 
         self.multiverse.add_board((time + 1, new_dim), board)
 
@@ -1167,6 +1172,7 @@ class Chess5d:
         returns if it is (checkmate or stalemate) for specified player
             if player is None, uses currnet player
         checks if for all possible moves of the player, the player still ends up in check
+        note that this works in the case where player has no moves as well
         """
         if player is None:
             player = self.player_at(self.present())
@@ -1193,6 +1199,61 @@ class Chess5d:
                     # then there exists a sequence of moves that keeps the player out of check
                     return False
         return True
+
+    def last_player_moved(self):
+        for i in range(len(self.move_history) - 1, -1, -1):
+            move = self.move_history[i]
+            if move != END_TURN:
+                return self.player_at(move[0][0])
+
+    def terminal_eval(self):
+        """
+        to be run if game has just ended (king was captured, or no moves left)
+        :return: 1 if white (player 0) won, 0 if draw, -1 if black won
+        """
+        last_player = self.last_player_moved()
+        no_moves_left = self.no_moves(player=last_player)  # if the last player had remaining moves
+        last_player, last_turn = self.undo_turn()
+        king_captured = KING in {piece_id(captured) for _, captured in last_turn}
+        if king_captured:
+            # here the king was captured so either the last player won or drew
+            # if the opponent (previous turn) was in check, this is a win
+            # if the opponent (previous turn) was not in check:
+            #   if there was a turn that got opponent out of check, this is a loss for opponent (win for last player)
+            #   otherwise, a draw
+
+            # opponent=1-last_player
+            opponent, previous_turn = self.undo_turn()
+            if self.player_in_check(player=opponent):
+                # loss for opponent, win for last player
+                # if last player was white (0), this is a 1
+                # otherwise 0
+                return 1 - 2*last_player
+            else:
+                if self.is_checkmate_or_stalemate(player=opponent):
+                    # opponent was not in check, and all moves led to check, so this is stalemate
+                    return 0
+                else:
+                    # there was a move to get out of check, it was unfound, so opponent lost
+                    return 1 - 2*last_player
+        else:
+            if not no_moves_left:
+                raise Exception("TERMINAL EVAL CALLED ON NON-TERMINAL STATE")
+            # here the king was not captured, so last player must have had no moves left
+            # either a loss for last player (there was a valid turn that doesnt lead to check)
+            # or a draw (all valid turns lead to check)
+            if self.is_checkmate_or_stalemate(player=last_player):
+                # there are no valid moves to get out of check
+                if self.player_in_check(player=last_player):
+                    # if last player was in check at the start of their turn, this is a loss (checkmate)
+                    return 2*last_player - 1
+                else:
+                    # if there was no check, this is stalemate, so a draw
+                    return 0
+            else:
+                # there was a valid sequence of moves that did not lead to check, unfound by last player
+                # thus, last player lost
+                return 2*last_player - 1
 
     def player_at(self, time=None):
         """

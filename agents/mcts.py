@@ -1,7 +1,8 @@
 import torch
 from src.chess5d import Chess5d, END_TURN, KING, EMPTY, piece_id
-from torch import nn
 import numpy as np
+from src.agent import Agent, game_outcome
+from agents.non_learning import Randy
 
 DUMMY_MOVE = None
 
@@ -108,42 +109,16 @@ class Node:
     def is_terminal(self):
         return len(self.next_moves) == 0 or self.captured == KING
 
-    def terminal_eval(self, temp_game):
-        if self.captured == KING:
-            # this returns the evaluation for parent.player
-            # self.player == parent.player in this case, as an END_TURN was not played
-            # thus, if the parent captured the king without stalemate, the parent won, and this will return 1
-            opponent=1-self.player
-            # however, we must do a stalemate check
-            temp_game.undo_turn(player=self.player)
-            # game now at the start of players move
-            temp_game.undo_turn(player=opponent)
-            # game now at start of opponents move
-
-            if temp_game.player_in_check(player=opponent):
-                # in this case, either we have checkmate
-                # or the opponent was in check and stayed in check
-                # either way, current player wins
-                return 1
-            else:
-                # in this case, the opponent did not start their turn in check
-                # this is the difficult case, we must test for stalemate
-                if temp_game.is_checkmate_or_stalemate(player=opponent):
-                    # there is no move that makes opponent avoid check, thus, this is stalemate
-                    # it cannot be checkmate since opponent is not in check
-                    return 0
-                else:
-                    # there was a moveset that took opponent out of check, but it was not played
-                    # thus opponent lost and player won
-                    return 1
-
-
-            return 1
-        # otherwise, this is a stalemate and thus a draw
-        return 0
+    def terminal_eval(self, temp_game: Chess5d):
+        result = temp_game.terminal_eval()
+        # result is 1 if white won, 0 if draw, -1 if black won
+        if self.player == 1:
+            # in this case, flip the result
+            result = -result
+        return result
 
     def fully_expanded(self):
-        return np.all(self.child_number_visits!=0)
+        return np.all(self.child_number_visits != 0)
 
     def expand(self, child_priors):
         self.is_expanded = True
@@ -229,6 +204,8 @@ def create_pvz_evaluator(policy_value_net):
     :param policy_value_net: (game encoding, moves) -> (policy, value)
         only works for white
     :return: (game, player) -> (policy,value)
+        assumes player is the one whose move it is
+        returns the evaluation and policy for player
     """
 
     def pvz(game: Chess5d, player, moves):
@@ -240,6 +217,45 @@ def create_pvz_evaluator(policy_value_net):
         return policy.flatten().detach().numpy(), value.flatten().detach().item()
 
     return pvz
+
+
+class MCTSAgent(Agent):
+    """
+    picks moves with a simple mcts
+        would expect this does not go well
+    """
+
+    def __init__(self, num_reads=1000):
+        super().__init__()
+        self.num_reads = num_reads
+        self.playout_agent = Randy()
+
+    def pick_move(self, game: Chess5d, player):
+        UCT_search(game=game,
+                   player=player,
+                   num_reads=self.num_reads,
+                   policy_value_evaluator=create_pvz_evaluator(
+                       policy_value_net=self.policy_value
+                   ),
+                   )
+
+    def policy_value(self, game: Chess5d, player, moves):
+        """
+        returns the value of a game for specified player
+
+        does this through random playout
+        """
+        policy = (99 + torch.rand(len(moves)))/100
+        outcome = game_outcome(
+            player=self.playout_agent,
+            opponent=self.playout_agent,
+            game=game,
+            first_player=player,
+        )
+        if player == 1:
+            # flip the value in this case
+            outcome = -outcome
+        return policy, torch.tensor([outcome])
 
 
 if __name__ == '__main__':
@@ -272,25 +288,23 @@ if __name__ == '__main__':
             break
     print(easy_game.multiverse)
 
-
-
     stalemate = Chess2d(
         board=Board(pieces=[[as_player(KING, 1)] + [EMPTY for _ in range(BOARD_SIZE - 1)]] +
                            [[EMPTY for _ in range(BOARD_SIZE)] for _ in range(BOARD_SIZE - 4)] +
-                           [[EMPTY, as_player(QUEEN, 1)] + [EMPTY for _ in range(BOARD_SIZE - 2)]]+
-                           [[EMPTY for _ in range(BOARD_SIZE)]]+
+                           [[EMPTY, as_player(QUEEN, 1)] + [EMPTY for _ in range(BOARD_SIZE - 2)]] +
+                           [[EMPTY for _ in range(BOARD_SIZE)]] +
                            [[as_player(KING, 0)] + [EMPTY for _ in range(BOARD_SIZE - 1)]]
                     ))
 
     next_move, root = UCT_search(stalemate, player=0, num_reads=128, policy_value_evaluator=evaluator)
     print(stalemate)
     print(next_move)
-    root:Node
-    child=root.children[next_move].children[END_TURN]
-    child:Node
+    root: Node
+    child = root.children[next_move].children[END_TURN]
+    child: Node
     stalemate.make_move(next_move)
-    nexxxtmove=((1, 0, 5, 1), (1, 0, 6, 0))
-    grandchild=child.children[nexxxtmove]
+    nexxxtmove = ((1, 0, 5, 1), (1, 0, 6, 0))
+    grandchild = child.children[nexxxtmove]
     stalemate.make_move(nexxxtmove)
-    grandchild:Node
+    grandchild: Node
     print(grandchild.terminal_eval(stalemate))

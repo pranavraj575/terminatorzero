@@ -51,12 +51,12 @@ class FastGuy(Agent):
 
 
 if __name__ == '__main__':
-    from src.agent import outcome
+    from src.agent import game_outcome
     from src.utilitites import seed_all
     from src.chess5d import Chess2d
 
     seed_all(1)
-    winner, game = outcome(FastGuy(), FastGuy())
+    winner, game = game_outcome(FastGuy(), FastGuy())
     print(game)
     for move in (game.move_history):
         print(move)
