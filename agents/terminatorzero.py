@@ -29,7 +29,7 @@ class TerminatorZero(Agent):
     def pick_move(self, game: Chess5d, player):
         pass
 
-    def get_loss(self, game: Chess5d, player, policy_target, value_target):
+    def get_loss(self, game: Chess5d, player, policy_target, value_target) -> torch.Tensor:
         moves = list(game.all_possible_moves(player=player))
         if player == 1:
             game.flip_game()
@@ -111,7 +111,7 @@ class TerminatorZero(Agent):
         batch_size = min(batch_size, len(self.buffer))
         self.optimizer.zero_grad()
         sample = self.buffer.sample(batch_size)
-        overall_loss = 0
+        overall_loss = torch.zeros(1)
         for namedtup in sample:
             game, player, policy_target, value_target = self.get_game_policy_value(namedtup)
             overall_loss += self.get_loss(game=game,
@@ -193,13 +193,28 @@ if __name__ == '__main__':
                            training_num_reads=1,
                            lr=.0001,
                            )
+
     agent.add_training_data(draw_moves=0)
     for i in range(10):
         print('loss', agent.training_step())
     agent.save_all('test')
+
     agent2 = TerminatorZero(network=ConvolutedArchitect(input_dim=Chess5d.get_input_dim(),
                                                         embedding_dim=256,
                                                         num_residuals=10
                                                         ), training_num_reads=1)
+
+    agent3 = TerminatorZero(network=ConvolutedArchitect(input_dim=Chess5d.get_input_dim(),
+                                                        embedding_dim=256,
+                                                        num_residuals=10
+                                                        ), training_num_reads=1)
     agent2.load_all('test')
-    os.remove('test')
+    agent3.load_all('test')
+    game, player, policy_target, value_target = agent2.get_game_policy_value(agent2.buffer.sample(1)[0])
+    encoding = torch.tensor(game.encoding(), dtype=torch.float).unsqueeze(0)
+
+    print(agent2.network.forward(encoding, moves=list(game.all_possible_moves(player=player))))
+    print(agent3.network.forward(encoding, moves=list(game.all_possible_moves(player=player))))
+    for key, value in agent2.network.state_dict().items():
+        print(key)
+    quit()

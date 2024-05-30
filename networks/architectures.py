@@ -158,14 +158,6 @@ class ConvolutedArchitect(AlphaPairwiseCollapseArchitect):
         # returns (policy, value)
         return self.output(X, moves)
 
-    def parameters(self, recurse: bool = True):
-        for module in (self.enc, self.output):
-            for param in module.parameters():
-                yield param
-        for module in self.layers:
-            for param in module.parameters():
-                yield param
-
 
 class TransArchitect(AlphaPairwiseCollapseArchitect):
     def __init__(self,

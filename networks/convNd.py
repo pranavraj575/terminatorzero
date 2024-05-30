@@ -6,10 +6,8 @@ import torchConvNd
 import torch
 from torch import nn
 
-from networks.collapse import Collapse
-from networks.ffn import FFN
 from src.chess5d import Chess5d
-from networks.permute import CisToTransPerm, TransToCisPerm
+from networks.permute import TransToCisPerm
 
 
 class ConvBlock(nn.Module):
@@ -32,6 +30,7 @@ class ConvBlock(nn.Module):
                                         list(kernel),
                                         stride=stride,
                                         padding=padding)
+        self.conv1_param = nn.ParameterList(self.conv1.parameters())
         self.bn1 = nn.BatchNorm1d(output_channels)
         self.relu1 = nn.ReLU()
 
@@ -48,11 +47,6 @@ class ConvBlock(nn.Module):
         X = X.view(batch_size, self.output_channels, *other_dimensions)
 
         return self.relu1(X)
-
-    def parameters(self, recurse: bool = True):
-        for module in (self.conv1, self.bn1):
-            for param in module.parameters():
-                yield param
 
 
 class ResBlock(nn.Module):
@@ -84,6 +78,7 @@ class ResBlock(nn.Module):
                                         stride=stride,
                                         padding=padding,
                                         )
+        self.conv1_param = nn.ParameterList(self.conv1.parameters())
         self.bn1 = nn.BatchNorm1d(middle_channels)
         self.relu1 = nn.ReLU()
 
@@ -93,6 +88,7 @@ class ResBlock(nn.Module):
                                         stride=stride,
                                         padding=padding,
                                         )
+        self.conv2_param = nn.ParameterList(self.conv2.parameters())
         self.bn2 = nn.BatchNorm1d(num_channels)
         self.relu2 = nn.ReLU()
 
@@ -124,11 +120,6 @@ class ResBlock(nn.Module):
         # (batch size, num channels, D1, D2, ...)
         X = X.view(batch_size, self.num_channels, *other_dimensions)
         return self.relu2(_X + X)
-
-    def parameters(self, recurse: bool = True):
-        for module in (self.conv1, self.bn1, self.conv2, self.bn2):
-            for param in module.parameters():
-                yield param
 
 
 if __name__ == '__main__':
