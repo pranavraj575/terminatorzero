@@ -425,6 +425,8 @@ class Multiverse:
         """
         where did you go
         :return: coordinates of all final states
+
+        WILL ALWAYS RETURN COORDS IN SAME ORDER
         """
         overall_range = self.get_range()
         for dim_idx in range(overall_range[0], overall_range[1] + 1):
@@ -753,11 +755,16 @@ class Chess5d:
         iterable of time-dimension coords of boards where a piece can potentially be moved
 
         equivalent to the leaves of the natural tree
+
+        WILL ALWAYS RETURN BOARDS IN SAME ORDER
         """
         for td_idx in self.multiverse.leaves():
             yield td_idx
 
     def players_boards_with_possible_moves(self, player):
+        """
+        WILL ALWAYS RETURN BOARDS IN SAME ORDER
+        """
         for (t, d) in self.boards_with_possible_moves():
             if self.player_at(time=t) == player:
                 yield (t, d)
@@ -767,6 +774,8 @@ class Chess5d:
         returns possible moves of piece at idx
         :param idx: (time, dim, i, j)
         :return: iterable of idx candidates
+
+        WILL ALWAYS RETURN MOVES IN SAME ORDER
         """
         idx_time, idx_dim, idx_i, idx_j = idx
         piece = self.get_board((idx_time, idx_dim)).get_piece((idx_i, idx_j))
@@ -872,6 +881,9 @@ class Chess5d:
                             yield (idx_time, idx_dim, idx_i, idx_j + 2*dir)
 
     def board_all_possible_moves(self, td_idx, castling=True):
+        """
+        WILL ALWAYS RETURN MOVES IN SAME ORDER
+        """
         t, d = td_idx
         board = self.get_board(td_idx)
         for (i, j) in board.pieces_of(self.player_at(t)):
@@ -884,6 +896,8 @@ class Chess5d:
         returns an iterable of all possible moves of the specified player
         if player is None, uses the first player that needs to move
         None is included if the player does not NEED to move
+
+        WILL ALWAYS RETURN MOVES IN SAME ORDER
         """
         if player is None:
             player = self.player_at(time=self.present())
@@ -1296,11 +1310,16 @@ class Chess5d:
             game.make_move(move)
         return game
 
+    @staticmethod
+    def get_input_dim():
+        I, J, board_channels = Board.encoding_shape()
+        return board_channels + 3
+
     def encoding_shape(self):
         overall_range = self.multiverse.get_range()
         dimensions = 1 + overall_range[1] - overall_range[0]
         I, J, board_channels = Board.encoding_shape()
-        return (self.multiverse.max_length, dimensions, I, J, board_channels + 3)
+        return (self.multiverse.max_length, dimensions, I, J, Chess5d.get_input_dim())
 
     def encoding(self):
         encoded = np.zeros(self.encoding_shape())

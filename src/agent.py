@@ -8,7 +8,7 @@ class Agent:
     def pick_move(self, game: Chess5d, player):
         """
         returns a move for player in game
-        move is either (idx, end_idx) or None for switching players
+        move is either (idx, end_idx) or END_IDX for switching players
         """
         raise NotImplementedError
 

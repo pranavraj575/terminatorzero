@@ -81,6 +81,12 @@ class Node:
             # in this case, max of the unexplored nodes
             return self.next_moves[max(self.unexplored_indices(), key=lambda idx: self.child_priors[idx])]
 
+    def get_final_policy(self):
+        return torch.nn.Softmax(-1)(torch.tensor(self.child_Q())).flatten().detach().numpy()
+        # Alphazero usesuse child number visits because apparently this is less prone to outliers
+        return self.child_number_visits/np.sum(self.child_number_visits)
+        # return torch.nn.Softmax()(self.child_Q())
+
     def select_leaf(self, game: Chess5d):
         """
         selects leaf of self, makes moves on game along the way
@@ -172,7 +178,6 @@ def UCT_search(game: Chess5d, player, num_reads, policy_value_evaluator):
     :param policy_value_evaluator: (game, player, moves) -> (policy,value)
         returns how good the game is for player, if player is the one whose move it is
         moves is all possible moves at that point (if None, uses game.all_possible_moves(player))
-    :return:
     """
     root_game = game
     root = Node(temp_game=root_game.clone(),
@@ -195,7 +200,7 @@ def UCT_search(game: Chess5d, player, num_reads, policy_value_evaluator):
             )
             leaf.expand(child_priors=policy)
             leaf.backup(value_estimate=value_estimate)
-    return root.next_moves[np.argmax(root.child_Q())], root
+    return root.next_moves[np.argmax(root.get_final_policy())], root
 
 
 def create_pvz_evaluator(policy_value_net):
@@ -212,8 +217,9 @@ def create_pvz_evaluator(policy_value_net):
         if player == 1:
             # we should flip the game
             game.flip_game()
-        policy, value = policy_value_net(game.encoding(), moves)
-        value: torch.Tensor
+        policy, value = policy_value_net(torch.tensor(game.encoding(), dtype=torch.float).unsqueeze(0),
+                                         moves,
+                                         )
         return policy.flatten().detach().numpy(), value.flatten().detach().item()
 
     return pvz
