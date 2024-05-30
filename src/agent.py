@@ -29,18 +29,15 @@ def game_outcome(player: Agent,
         game = Chess5d()
     player_idx = first_player
 
-    captured = EMPTY
-    # while captured == EMPTY:
+    terminal=False
     bored = 0
-    while piece_id(captured) != KING:
-        if game.no_moves(player=player_idx):
-            break
+    while not terminal:
         current_player = (player, opponent)[player_idx]
         move = current_player.pick_move(game, player_idx)
         if move is END_TURN:
             player_idx = 1 - player_idx
-        else:
-            captured = game.make_move(move)
+
+        captured, terminal = game.make_move(move)
 
         if captured != EMPTY:
             bored = 0

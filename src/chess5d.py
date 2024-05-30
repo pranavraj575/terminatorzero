@@ -584,20 +584,31 @@ class Chess5d:
             idx: (time, dimension, x, y), must be on an existing board
             end_idx: (time, dimension, x, y), must be to an existing board, and
         this will edit the game state to remove the piece at idx, move it to end_idx
+        :return (piece captured (empty if None), terminal move)
+            NOTE: terminal move does NOT check for stalemate
+            it simply checks if either a king was just captured, or the player has no moves left
         """
 
-        if self.save_moves:
-            self.move_history.append(move)
         if move is END_TURN:
-            return EMPTY
+            if self.save_moves:
+                self.move_history.append(move)
+            return EMPTY, self.no_moves(player=self.player_at(self.present()))
+
         idx, end_idx = move
         if self.check_validity:
             if not self.board_can_be_moved(idx[:2]):
                 raise Exception("WARNING MOVE MADE ON INVALID BOARD: " + str(idx[:2]))
             if end_idx not in list(self.piece_possible_moves(idx)):
                 raise Exception("WARNING INVALID MOVE: " + str(idx) + ' -> ' + str(end_idx))
-
         time1, dim1, i1, j1 = idx
+
+        if self.move_history and self.last_player_moved() != self.player_at(time=time1):
+            # the previous player did not end their turn, so we can just do it here instead
+            self.make_move(END_TURN)
+        if not self.move_history and self.first_player != self.player_at(time=time1):
+            # it is the first move, and the player that moved is not the first player
+            self.make_move(END_TURN)
+
         old_board = self.get_board((time1, dim1))
         new_board, piece = old_board.remove_piece((i1, j1))
         if piece == EMPTY:
@@ -622,7 +633,6 @@ class Chess5d:
 
             new_board.depassant(just_moved=end_idx[2:])
             self.add_board_child((time2, dim2), new_board, move=move)
-            return capture
         else:
             # this is the timeline that piece left behind
             new_board.depassant(just_moved=None)  # there are no just moved pawns
@@ -633,7 +643,13 @@ class Chess5d:
             # even if this is a pawn, enpassant is not possible with timespace jumps
             newer_board.depassant(just_moved=None)
             self.add_board_child((time2, dim2), newer_board, move=move)
-            return capture
+        player = self.player_at(time=time1)
+        terminal = piece_id(capture) == KING or self.no_moves(player=player)
+        # this is a terminal move if we just captured the king, or if the player that just moved has no moves
+        # we know the player that just moved has the next move since the last move was not END_TURN
+        if self.save_moves:
+            self.move_history.append(move)
+        return capture, terminal
 
     def dimension_made_by(self, td_idx, move):
         return self.dimension_spawn_history[(td_idx, move)]
@@ -1226,8 +1242,14 @@ class Chess5d:
         :return: 1 if white (player 0) won, 0 if draw, -1 if black won
         """
         last_player = self.last_player_moved()
+        if self.move_history[-1] == END_TURN:
+            last_player = 1 - last_player  # last player is the next player, as the last player that moved ended turn
+            last_turn = ()
+        else:
+            _, last_turn = self.undo_turn()
+
         no_moves_left = self.no_moves(player=last_player)  # if the last player had remaining moves
-        last_player, last_turn = self.undo_turn()
+
         king_captured = KING in {piece_id(captured) for _, captured in last_turn}
         if king_captured:
             # here the king was captured so either the last player won or drew

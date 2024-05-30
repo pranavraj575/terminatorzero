@@ -24,6 +24,7 @@ class Node:
                  player,
                  move,
                  capture,
+                 terminal,
                  parent=None,
                  next_moves=None,
                  exploration_constant=1.,
@@ -43,6 +44,7 @@ class Node:
         self.player = player
         self.move = move
         self.parent = parent
+        self.terminal = terminal
         self.child_policy = {}
         self.is_expanded = False
         self.children = {}
@@ -113,7 +115,7 @@ class Node:
         return self.parent == None
 
     def is_terminal(self):
-        return len(self.next_moves) == 0 or self.captured == KING
+        return self.terminal
 
     def terminal_eval(self, temp_game: Chess5d):
         result = temp_game.terminal_eval()
@@ -140,7 +142,7 @@ class Node:
         returns resulting child and resulting game
             mutates game state
         """
-        capture = game.make_move(move)
+        capture, terminal = game.make_move(move)
         if move not in self.children:
             if move is END_TURN:
                 new_player = 1 - self.player
@@ -151,6 +153,7 @@ class Node:
                                        move=move,
                                        capture=capture,
                                        parent=self,
+                                       terminal=terminal,
                                        )
         return self.children[move], game
 
@@ -185,8 +188,9 @@ def UCT_search(game: Chess5d, player, num_reads, policy_value_evaluator):
                 move=DUMMY_MOVE,
                 capture=EMPTY,
                 parent=DummyNode(player=player),
+                terminal=False,
                 )
-    if root.is_terminal():
+    if game.no_moves(player=player):
         return None, root
     for i in range(num_reads):
         leaf, leaf_game = root.select_leaf(game=root_game.clone())
@@ -272,7 +276,7 @@ class MCTSAgent(Agent):
 
 
 if __name__ == '__main__':
-    from src.chess5d import Board, Chess2d, BOARD_SIZE, QUEEN, ROOK, as_player
+    from src.chess5d import Board, Chess2d, BOARD_SIZE, QUEEN, as_player
     from src.utilitites import seed_all
 
     seed_all(1)

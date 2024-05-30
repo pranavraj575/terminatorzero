@@ -169,14 +169,17 @@ class TerminatorZero(Agent):
             game = Chess5d()
         if network is None:
             network = self.network
-        captured = EMPTY
+
+        terminal = False
         data = []
         early_termination = False
         bored = 0
         player = first_player
-        while piece_id(captured) != KING:
-            if game.no_moves(player=player):
-                break
+
+        if game.no_moves(player=player):
+            print("WARNING: training on game that starts with no possible moves")
+            return
+        while not terminal:
             num_reads = self.training_num_reads + len(list(game.all_possible_moves(player=player)))
             best_move, root = UCT_search(game=game,
                                          player=player,
@@ -186,7 +189,7 @@ class TerminatorZero(Agent):
             policy = root.get_final_policy()
             data.append((game.compressed(), player, policy))
 
-            game.make_move(move=best_move)
+            captured, terminal = game.make_move(move=best_move)
 
             if best_move == END_TURN:
                 player = 1 - player
