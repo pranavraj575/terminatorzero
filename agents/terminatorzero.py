@@ -34,7 +34,15 @@ class TerminatorZero(Agent):
     def pick_move(self, game: Chess5d, player):
         pass
 
-    def get_losses(self, game: Chess5d, player, policy_target, value_target) -> (torch.Tensor, torch.Tensor):
+    def get_losses(self, game: Chess5d,
+                   player,
+                   policy_target,
+                   value_target,
+                   policy_smoothing=0.,
+                   ) -> (torch.Tensor, torch.Tensor):
+        """
+        :param policy_smoothing: add small amount to policy to avoid log(0)
+        """
         moves = list(game.all_possible_moves(player=player))
         if player == 1:
             game.flip_game()
@@ -42,13 +50,21 @@ class TerminatorZero(Agent):
         policy, value = self.network.forward(encoding, moves=moves)
         if player == 1:
             game.flip_game()
+        # crossentropy loss
+        # annoying to use torch.nn.CrossEntropyLoss since it assumes the output is pre softmax
+        # so, just implement it manually like this
+        policy_target = torch.tensor(policy_target, dtype=torch.float)
+        policy_loss = -torch.dot(policy_target,
+                                 torch.log(policy_smoothing + policy.flatten()))
 
-        policy_criterion = nn.CrossEntropyLoss()
-        policy_loss = policy_criterion(policy.flatten(), torch.tensor(policy_target, dtype=torch.float))
+        # calculate the entropy of the target distribution, and subtract it
+        # all this does is shift the loss so that the optimal loss is 0
+        # this will not affect the gradients at all, as this is a constant wrt the network params
+        optimal_policy_loss = -torch.dot(policy_target,torch.log(policy_target))
+        policy_loss = policy_loss - optimal_policy_loss
 
         value_criterion = nn.SmoothL1Loss()
         value_loss = value_criterion(value.flatten(), torch.tensor([value_target], dtype=torch.float))
-
         return policy_loss, value_loss
 
     def save_all(self, path):
@@ -218,38 +234,47 @@ class TerminatorZero(Agent):
 
 if __name__ == '__main__':
     from src.utilitites import seed_all
+    import sys
+
+    DIR = os.path.dirname(os.path.dirname(os.path.abspath(sys.argv[0])))
+    save_dir = os.path.join(DIR, 'save_test')
+    embedding_dim = 256
+    num_residuals = 2
 
     seed_all()
     net = ConvolutedArchitect(input_dim=Chess5d.get_input_dim(),
-                              embedding_dim=256,
-                              num_residuals=10
+                              embedding_dim=embedding_dim,
+                              num_residuals=num_residuals
                               )
     agent = TerminatorZero(network=net,
                            training_num_reads=1,
-                           lr=.0001,
+                           lr=.001,
                            )
 
     agent.add_training_data(draw_moves=0)
-    for i in range(10):
-        print('loss', agent.training_step())
-    agent.save_all('test')
+    for i in range(100):
+        loss = agent.training_step()
+        if not i%1:
+            print('loss', loss)
+    agent.save_all(save_dir)
 
     agent2 = TerminatorZero(network=ConvolutedArchitect(input_dim=Chess5d.get_input_dim(),
-                                                        embedding_dim=256,
-                                                        num_residuals=10
+                                                        embedding_dim=embedding_dim,
+                                                        num_residuals=num_residuals
                                                         ), training_num_reads=1)
 
     agent3 = TerminatorZero(network=ConvolutedArchitect(input_dim=Chess5d.get_input_dim(),
-                                                        embedding_dim=256,
-                                                        num_residuals=10
+                                                        embedding_dim=embedding_dim,
+                                                        num_residuals=num_residuals
                                                         ), training_num_reads=1)
-    agent2.load_all('test')
-    agent3.load_all('test')
+    agent2.load_all(save_dir)
+    agent3.load_all(save_dir)
     game, player, policy_target, value_target = agent2.get_game_policy_value(agent2.buffer.sample(1)[0])
     encoding = torch.tensor(game.encoding(), dtype=torch.float).unsqueeze(0)
 
-    print(agent2.network.forward(encoding, moves=list(game.all_possible_moves(player=player))))
-    print(agent3.network.forward(encoding, moves=list(game.all_possible_moves(player=player))))
+    policy2, value2 = (agent2.network.forward(encoding, moves=list(game.all_possible_moves(player=player))))
+    policy3, value3 = (agent3.network.forward(encoding, moves=list(game.all_possible_moves(player=player))))
+    assert torch.equal(policy2, policy3)
+    assert torch.equal(value2, value3)
     for key, value in agent2.network.state_dict().items():
         print(key)
-    quit()

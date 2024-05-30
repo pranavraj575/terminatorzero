@@ -3,10 +3,12 @@ full networks that go from encoded game (batch size, D1, ..., input_dim) to (pol
 """
 import torch
 from torch import nn
+
 from networks.transformer import InitialEmbedding, DecoderBlock
 from networks.permute import TransToCisPerm, CisToTransPerm
 from networks.convNd import ConvBlock, ResBlock
 from networks.policy_value_net import PairwisePolicy, CollapsedValue, PolicyValueNet
+from networks.positional_encoding import PositionalEncodingLayer
 
 
 class AlphaArchitecture(nn.Module):
@@ -83,6 +85,7 @@ class ConvolutedArchitect(AlphaPairwiseCollapseArchitect):
                  input_dim,
                  embedding_dim,
                  num_residuals,
+                 positional_encoding_nums=None,
                  kernel=None,
                  middle_dim=None,
 
@@ -99,6 +102,8 @@ class ConvolutedArchitect(AlphaPairwiseCollapseArchitect):
         :param input_dim: dimension of input
         :param embedding_dim: dimension to use for embedding
         :param num_residuals: number of residual CNNs to use
+        :param positional_encoding_nums: number of positional encodings to use on each dimension
+            default is (8,8,3,3)
         :param kernel: kernel of all convolutions, if None, use (3,3,3,3)
         :param middle_dim: will be sent to all the residual networks as their middle encoding dim
 
@@ -126,8 +131,17 @@ class ConvolutedArchitect(AlphaPairwiseCollapseArchitect):
         )
         if kernel is None:
             kernel = (3, 3, 3, 3)
+
+        if positional_encoding_nums is None:
+            positional_encoding_nums = (8, 8, 3, 3)
+        self.pos_enc = PositionalEncodingLayer(encoding_nums=positional_encoding_nums)
         self.perm1 = TransToCisPerm()
-        self.enc = ConvBlock(input_channels=input_dim, output_channels=embedding_dim, kernel=kernel)
+
+        initial_embedding = input_dim + self.pos_enc.additional_output()
+        self.enc = ConvBlock(input_channels=initial_embedding,
+                             output_channels=embedding_dim,
+                             kernel=kernel,
+                             )
         self.layers = nn.ModuleList([
             ResBlock(num_channels=embedding_dim, kernel=kernel, middle_channels=middle_dim) for _ in
             range(num_residuals)
@@ -144,7 +158,10 @@ class ConvolutedArchitect(AlphaPairwiseCollapseArchitect):
         """
         # X is (batch size, D1, D2, ..., input dim)
 
-        # now (batch size, input dim, D1, D2, ...)
+        # X is (batch size, D1, D2, ..., input embedding)
+        X = self.pos_enc(X)
+
+        # now (batch size, input embedding, D1, D2, ...)
         X = self.perm1(X)
 
         # (batch size, embedding dim, D1, D2, ...)
@@ -358,26 +375,32 @@ class ConvolutedTransArchitect(AlphaPairwiseCollapseArchitect):
 if __name__ == '__main__':
     from src.chess5d import Chess5d
 
-    game = Chess5d()
+    moves = [
+        ((0, 0, 1, 3), (0, 0, 3, 3)),
+        ((1, 0, 6, 4), (1, 0, 4, 4)),
+        ((2, 0, 0, 1), (0, 0, 2, 1)),
+        ((1, -1, 6, 6), (1, -1, 5, 6)),
+        ((2, -1, 1, 7), (2, -1, 2, 7)),
+        ((3, 0, 6, 6), (3, -1, 6, 6)),
+        ((4, -1, 2, 1), (4, 0, 4, 1)),
+        ((5, 0, 4, 4), (5, -1, 4, 4)),
+        ((6, 0, 4, 1), (6, -1, 4, 3)),
+        ((7, -1, 7, 1), (7, 0, 5, 1)),
+        ((8, -1, 0, 1), (8, 0, 2, 1)),
+        ((9, 0, 5, 1), (9, -1, 7, 1)),
+        ((10, 0, 2, 1), (10, -1, 0, 1)),
+        ((11, 0, 7, 3), (11, 0, 3, 7)),
+        ((11, -1, 7, 1), (11, -1, 5, 2)),
+        ((12, -1, 4, 3), (8, -1, 4, 2)),
+        # ((12, 0, 0, 6), (10, 0, 2, 6)),
+        # ((13, 0, 3, 7), (1, 0, 3, 7)),
+        # ((2, 1, 0, 1), (6, 0, 0, 1)),
+    ]
 
     game = Chess5d()
 
-    game.make_move(((0, 0, 1, 3), (0, 0, 3, 3)))
-    game.make_move(((1, 0, 6, 4), (1, 0, 4, 4)))
-    game.make_move(((2, 0, 0, 1), (0, 0, 2, 1)))
-    game.make_move(((1, -1, 6, 6), (1, -1, 5, 6)))
-    game.make_move(((2, -1, 1, 7), (2, -1, 2, 7)))
-    game.make_move(((3, 0, 6, 6), (3, -1, 6, 6)))
-    game.make_move(((4, -1, 2, 1), (4, 0, 4, 1)))
-    game.make_move(((5, 0, 4, 4), (5, -1, 4, 4)))
-    game.make_move(((6, 0, 4, 1), (6, -1, 4, 3)))
-    game.make_move(((7, -1, 7, 1), (7, 0, 5, 1)))
-    game.make_move(((8, -1, 0, 1), (8, 0, 2, 1)))
-    game.make_move(((9, 0, 5, 1), (9, -1, 7, 1)))
-    game.make_move(((10, 0, 2, 1), (10, -1, 0, 1)))
-    game.make_move(((11, 0, 7, 3), (11, 0, 3, 7)))
-    game.make_move(((11, -1, 7, 1), (11, -1, 5, 2)))
-    game.make_move(((12, -1, 4, 3), (8, -1, 4, 2)))
+    for move in moves:
+        game.make_move(move)
     for _ in range(12):
         game.undo_move()
     encoding = torch.tensor(game.encoding(), dtype=torch.float).unsqueeze(0)

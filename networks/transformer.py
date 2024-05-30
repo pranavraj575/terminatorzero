@@ -9,65 +9,7 @@ from torch import nn
 
 from src.chess5d import Chess5d
 from networks.ffn import FFN
-from networks.collapse import Collapse
-
-
-class PositionalEncodingLayer(nn.Module):
-
-    def __init__(self, encoding_nums: [int]):
-        super().__init__()
-        self.encoding_nums = encoding_nums
-
-    def additional_output(self) -> int:
-        return 2*sum(self.encoding_nums)
-
-    def forward(self, X: torch.Tensor) -> torch.Tensor:
-        """
-        X has shape (batch_size, D1, D2, ..., initial dim)
-
-        The output will have shape (batch_size,  D1, D2, ..., initial_dim + self.additional_output())
-        """
-        # board_shape=(D1, D2, ...)
-        batch_size, *board_shape, initial_dim = X.shape
-
-        for dimension, encoding_num in enumerate(self.encoding_nums):
-
-            append_shape = list(X.shape)
-            append_shape[-1] = 2*encoding_num
-            # shape is (batch_size, D1, D2, ..., additional size)
-
-            sequence_length = board_shape[dimension]
-
-            # size (sequence length)
-            count = torch.arange(0, sequence_length)
-
-            # size (num encodings)
-            # frequencies=1/torch.pow(10000,torch.arange(0,self.num_encodings)/self.num_encodings)
-            frequencies = 1/torch.pow(2, torch.arange(1, encoding_num + 1))
-
-            # size (sequence length, num encodings)
-            inputs = count.view((-1, 1))*(2*torch.pi*frequencies)
-
-            # size (sequence length, 2 * num encodings)
-            P = torch.cat((torch.sin(inputs), torch.cos(inputs)), dim=-1)
-
-            # size (1, sequence length, 2 * num encodings)
-            P = P.view((1, *P.shape))
-
-            for _ in range(dimension):
-                P = P.view(P.shape[0], 1, *P.shape[1:])
-            # size (1 (this is the 'batch size' dimension), 1, ..., 1, sequence length, 2 * num encodings)
-
-            # where sequence_length is in the correct dimension that we are looking at
-
-            while len(P.shape) < len(append_shape):
-                P = P.view(*P.shape[:-1], 1, P.shape[-1])
-            # size (1, 1, ..., 1, sequence length, 1, ..., 2 * num encodings)
-
-            X = torch.cat((X, P + torch.zeros(append_shape)), dim=-1)
-            # size (batch_size, D1, D2, ..., X.shape[-1]+2*num encodings)
-
-        return X
+from networks.positional_encoding import PositionalEncodingLayer
 
 
 class InitialEmbedding(nn.Module):
@@ -322,24 +264,30 @@ class DecoderBlock(nn.Module):
 if __name__ == '__main__':
     import time as timothy
 
+    moves = [
+        ((0, 0, 1, 3), (0, 0, 3, 3)),
+        ((1, 0, 6, 4), (1, 0, 4, 4)),
+        ((2, 0, 0, 1), (0, 0, 2, 1)),
+        ((1, -1, 6, 6), (1, -1, 5, 6)),
+        ((2, -1, 1, 7), (2, -1, 2, 7)),
+        ((3, 0, 6, 6), (3, -1, 6, 6)),
+        ((4, -1, 2, 1), (4, 0, 4, 1)),
+        ((5, 0, 4, 4), (5, -1, 4, 4)),
+        ((6, 0, 4, 1), (6, -1, 4, 3)),
+        ((7, -1, 7, 1), (7, 0, 5, 1)),
+        ((8, -1, 0, 1), (8, 0, 2, 1)),
+        ((9, 0, 5, 1), (9, -1, 7, 1)),
+        ((10, 0, 2, 1), (10, -1, 0, 1)),
+        ((11, 0, 7, 3), (11, 0, 3, 7)),
+        ((11, -1, 7, 1), (11, -1, 5, 2)),
+        ((12, -1, 4, 3), (8, -1, 4, 2)),
+        # ((12, 0, 0, 6), (10, 0, 2, 6)),
+        # ((13, 0, 3, 7), (1, 0, 3, 7)),
+        # ((2, 1, 0, 1), (6, 0, 0, 1)),
+    ]
     game = Chess5d()
-
-    game.make_move(((0, 0, 1, 3), (0, 0, 3, 3)))
-    game.make_move(((1, 0, 6, 4), (1, 0, 4, 4)))
-    game.make_move(((2, 0, 0, 1), (0, 0, 2, 1)))
-    game.make_move(((1, -1, 6, 6), (1, -1, 5, 6)))
-    game.make_move(((2, -1, 1, 7), (2, -1, 2, 7)))
-    game.make_move(((3, 0, 6, 6), (3, -1, 6, 6)))
-    game.make_move(((4, -1, 2, 1), (4, 0, 4, 1)))
-    game.make_move(((5, 0, 4, 4), (5, -1, 4, 4)))
-    game.make_move(((6, 0, 4, 1), (6, -1, 4, 3)))
-    game.make_move(((7, -1, 7, 1), (7, 0, 5, 1)))
-    game.make_move(((8, -1, 0, 1), (8, 0, 2, 1)))
-    game.make_move(((9, 0, 5, 1), (9, -1, 7, 1)))
-    game.make_move(((10, 0, 2, 1), (10, -1, 0, 1)))
-    game.make_move(((11, 0, 7, 3), (11, 0, 3, 7)))
-    game.make_move(((11, -1, 7, 1), (11, -1, 5, 2)))
-    game.make_move(((12, -1, 4, 3), (8, -1, 4, 2)))
+    for move in moves:
+        game.make_move(move)
     for _ in range(10):
         game.undo_move()
     encoding = torch.tensor(game.encoding(), dtype=torch.float).unsqueeze(0)

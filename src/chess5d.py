@@ -1521,26 +1521,49 @@ class Chess2d(Chess5d):
 if __name__ == '__main__':
     game = Chess5d(save_moves=True, check_validity=True)
     gameclone = game.clone()
-    print('capture', game.make_move(((0, 0, 1, 3), (0, 0, 3, 3))))
-    print('capture', game.make_move(((1, 0, 6, 4), (1, 0, 4, 4))))
-    print('capture', game.make_move(((2, 0, 0, 1), (0, 0, 2, 1))))
+    moves = [
+        ((0, 0, 1, 3), (0, 0, 3, 3)),
+        'END_TURN',
+        ((1, 0, 6, 4), (1, 0, 4, 4)),
+        'END_TURN',
+        ((2, 0, 0, 1), (0, 0, 2, 1)),
+        'END_TURN',
+        ((1, -1, 6, 6), (1, -1, 5, 6)),
+        'END_TURN',
+        ((2, -1, 1, 7), (2, -1, 2, 7)),
+        'END_TURN',
+        ((3, 0, 6, 6), (3, -1, 6, 6)),
+        'END_TURN',
+        ((4, -1, 2, 1), (4, 0, 4, 1)),
+        'END_TURN',
+        ((5, 0, 4, 4), (5, -1, 4, 4)),
+        'END_TURN',
+        ((6, 0, 4, 1), (6, -1, 4, 3)),
+        'END_TURN',
+        ((7, -1, 7, 1), (7, 0, 5, 1)),
+        'END_TURN',
+        ((8, -1, 0, 1), (8, 0, 2, 1)),
+        'END_TURN',
+        ((9, 0, 5, 1), (9, -1, 7, 1)),
+        'END_TURN',
+        ((10, 0, 2, 1), (10, -1, 0, 1)),
+        'END_TURN',
+        ((11, 0, 7, 3), (11, 0, 3, 7)),
+        ((11, -1, 7, 1), (11, -1, 5, 2)),
+        'END_TURN',
+        ((12, -1, 4, 3), (8, -1, 4, 2)),
+        # ((12, 0, 0, 6), (10, 0, 2, 6)),
+        # 'END_TURN',
+        # ((13, 0, 3, 7), (1, 0, 3, 7)),
+        # 'END_TURN',
+        # ((2, 1, 0, 1), (6, 0, 0, 1)),
+    ]
+
     gameclone2 = game.clone()
-    print('capture', game.make_move(((1, -1, 6, 6), (1, -1, 5, 6))))
-    print('capture', game.make_move(((2, -1, 1, 7), (2, -1, 2, 7))))
-    print('capture', game.make_move(((3, 0, 6, 6), (3, -1, 6, 6))))
-    print('capture', game.make_move(((4, -1, 2, 1), (4, 0, 4, 1))))
-    print('capture', game.make_move(((5, 0, 4, 4), (5, -1, 4, 4))))
-    print('capture', game.make_move(((6, 0, 4, 1), (6, -1, 4, 3))))
-    print('capture', game.make_move(((7, -1, 7, 1), (7, 0, 5, 1))))
-    print('capture', game.make_move(((8, -1, 0, 1), (8, 0, 2, 1))))
-    print('capture', game.make_move(((9, 0, 5, 1), (9, -1, 7, 1))))
-    print('capture', game.make_move(((10, 0, 2, 1), (10, -1, 0, 1))))
-    print('capture', game.make_move(((11, 0, 7, 3), (11, 0, 3, 7))))
-    print('capture', game.make_move(((11, -1, 7, 1), (11, -1, 5, 2))))
-    print('capture', game.make_move(((12, -1, 4, 3), (8, -1, 4, 2))))
-    # print('capture', game.make_move(((12, 0, 0, 6), (10, 0, 2, 6))))
-    # print('capture', game.make_move(((13, 0, 3, 7), (1, 0, 3, 7))))
-    # print('capture', game.make_move(((2, 1, 0, 1), (6, 0, 0, 1))))
+    for i, move in enumerate(moves):
+        if i == 5:
+            gameclone2 = game.clone()
+        print('capture', game.make_move(move))
     gameclone3 = game.clone()
     while len(gameclone3.move_history) > len(gameclone2.move_history):
         gameclone3.undo_move()
