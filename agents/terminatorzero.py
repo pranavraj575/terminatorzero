@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 import os, pickle
+import random
 
 from src.agent import Agent, game_outcome
 from agents.mcts import UCT_search, create_pvz_evaluator
@@ -24,12 +25,16 @@ class TerminatorZero(Agent):
         self.dataset = []
         self.optimizer = torch.optim.Adam(self.network.parameters(), lr=lr)
         self.decompressor = decompressor
-        self.info = dict()
+        self.info = {
+            'epochs': 0,
+            'policy loss': [],
+            'value loss': [],
+        }
 
     def pick_move(self, game: Chess5d, player):
         pass
 
-    def get_loss(self, game: Chess5d, player, policy_target, value_target) -> torch.Tensor:
+    def get_losses(self, game: Chess5d, player, policy_target, value_target) -> (torch.Tensor, torch.Tensor):
         moves = list(game.all_possible_moves(player=player))
         if player == 1:
             game.flip_game()
@@ -43,10 +48,8 @@ class TerminatorZero(Agent):
 
         value_criterion = nn.SmoothL1Loss()
         value_loss = value_criterion(value.flatten(), torch.tensor([value_target], dtype=torch.float))
-        print()
-        print('policy diff', policy.detach() - policy_target)
-        print('value diff', value.detach() - value_target)
-        return policy_loss + value_loss
+
+        return policy_loss, value_loss
 
     def save_all(self, path):
         """
@@ -107,22 +110,51 @@ class TerminatorZero(Agent):
         self.load_all(os.path.join(path, str(best)))
         return True
 
-    def training_step(self, batch_size=128):
+    def train(self,
+              total_epochs,
+              save_path,
+              starting_games=None,
+              draw_moves=float('inf'),
+              batch_size=128,
+              ckpt_freq=10,
+              ):
+        prev_epochs = self.info['epochs']
+        for epoch in range(prev_epochs, total_epochs):
+            if starting_games is None:
+                game, player = None, 0
+            else:
+                game, player = random.choice(starting_games)
+
+            policy_loss, value_loss = self.epoch(game=game, first_player=player, draw_moves=draw_moves,
+                                                 batch_size=batch_size)
+            self.info['epochs'] += 1
+            self.info['policy loss'].append(policy_loss.item())
+            self.info['value loss'].append(value_loss.item())
+            if not self.info['epochs']%ckpt_freq:
+                self.save_checkpoint(path=save_path, epoch=self.info['epochs'])
+
+    def epoch(self, game=None, first_player=0, draw_moves=float('inf'), batch_size=128) -> (torch.Tensor, torch.Tensor):
+        self.add_training_data(game=game, first_player=first_player, network=self.network, draw_moves=draw_moves)
+        return self.training_step(batch_size=batch_size)
+
+    def training_step(self, batch_size=128) -> (torch.Tensor, torch.Tensor):
         batch_size = min(batch_size, len(self.buffer))
         self.optimizer.zero_grad()
         sample = self.buffer.sample(batch_size)
-        overall_loss = torch.zeros(1)
+        total_policy_loss, total_value_loss = torch.zeros(1), torch.zeros(1)
         for namedtup in sample:
             game, player, policy_target, value_target = self.get_game_policy_value(namedtup)
-            overall_loss += self.get_loss(game=game,
-                                          player=player,
-                                          policy_target=policy_target,
-                                          value_target=value_target,
-                                          )
-        overall_loss = overall_loss/batch_size
+            policy_loss, value_loss = self.get_losses(game=game,
+                                                      player=player,
+                                                      policy_target=policy_target,
+                                                      value_target=value_target,
+                                                      )
+            total_policy_loss += policy_loss/batch_size
+            total_value_loss += value_loss/batch_size
+        overall_loss = total_policy_loss + total_value_loss
         overall_loss.backward()
         self.optimizer.step()
-        return overall_loss
+        return total_policy_loss, total_value_loss
 
     def get_tuple(self, compressed_game, player, policy, value):
         return ((compressed_game, player), policy, value)
