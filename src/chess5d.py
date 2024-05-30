@@ -97,7 +97,7 @@ class Board:
         self.board = pieces
 
     def flipped_board(self):
-        return Board(pieces=[[as_player(piece, 1 - player_of(piece)) if piece is not EMPTY else EMPTY
+        return Board(pieces=[[as_player(piece, 1 - player_of(piece)) if piece != EMPTY else EMPTY
                               for piece in row]
                              for row in self.board[::-1]],
                      player=1 - self.player)
@@ -142,16 +142,26 @@ class Board:
                 if (i, j) != just_moved:
                     self.board[i][j] = remove_passant(self.board[i][j])
 
+    def all_pieces(self):
+        """
+        returns iterable of all pieces locations on the board
+        :return: iterable of (i,j)
+        """
+        for (i, row) in enumerate(self.board):
+            for (j, piece) in enumerate(row):
+                if player_of(piece) is not None:
+                    yield (i, j)
+
     def pieces_of(self, player):
         """
         returns iterable of pieces of specified player
         :param player: 0 for white, 1 for black
         :return: iterable of (i,j)
         """
-        for (i, row) in enumerate(self.board):
-            for (j, piece) in enumerate(row):
-                if player == player_of(piece):
-                    yield (i, j)
+        for idx in self.all_pieces():
+            piece = self.get_piece(idx)
+            if player == player_of(piece):
+                yield idx
 
     def clone(self):
         """
@@ -270,7 +280,7 @@ class Timeline:
     def flip_timeline(self):
         self.board_list = [board.flipped_board() for board in self.board_list]
 
-    def get_board(self, real_time: int):
+    def get_board(self, real_time: int) -> Board|None:
         """
         gets board at time, where time is the 'real' index, relative to 0
         """
@@ -552,7 +562,7 @@ class Chess5d:
         return game
 
     def _flip_move(self, move):
-        if move is END_TURN:
+        if move == END_TURN:
             return move
         ((time1, dim1, i1, j1), (time2, dim2, i2, j2)) = move
         return ((time1, -dim1, BOARD_SIZE - 1 - i1, j1), (time2, -dim2, BOARD_SIZE - 1 - i2, j2))
@@ -589,7 +599,7 @@ class Chess5d:
             it simply checks if either a king was just captured, or the player has no moves left
         """
 
-        if move is END_TURN:
+        if move == END_TURN:
             if self.save_moves:
                 self.move_history.append(move)
             return EMPTY, self.no_moves(player=self.player_at(self.present()))
@@ -645,6 +655,7 @@ class Chess5d:
             self.add_board_child((time2, dim2), newer_board, move=move)
         player = self.player_at(time=time1)
         terminal = piece_id(capture) == KING or self.no_moves(player=player)
+
         # this is a terminal move if we just captured the king, or if the player that just moved has no moves
         # we know the player that just moved has the next move since the last move was not END_TURN
         if self.save_moves:
@@ -665,7 +676,7 @@ class Chess5d:
             print('WARNING: no moves to undo')
             return (None, None)
         move = self.move_history.pop()
-        if move is END_TURN:
+        if move == END_TURN:
             return (move, EMPTY)
         idx, end_idx = move
 
@@ -709,7 +720,8 @@ class Chess5d:
         while move != END_TURN and self.player_at(move[0][0]) == player:
             turn_history.append(self.undo_move())
             if not self.move_history:
-                return
+                self.make_move(END_TURN)
+                return player, tuple(turn_history[::-1])
             move = self.move_history[-1]
         if not move == END_TURN:
             self.make_move(END_TURN)
@@ -1172,7 +1184,7 @@ class Chess5d:
         # we do not want castling as you cannot capture a piece with that
         # this also causes an infinite loop, as to check for castling, we must use this method
         for move in self.all_possible_moves(player=player, castling=False):
-            if move is not END_TURN:
+            if move != END_TURN:
                 start_idx, end_idx = move
                 if time_travel == False and start_idx[:2] == end_idx[:2]:
                     # in this case, we ignore since time travel is not considered
@@ -1236,19 +1248,25 @@ class Chess5d:
             if move != END_TURN:
                 return self.player_at(move[0][0])
 
-    def terminal_eval(self):
+    def terminal_eval(self, mutation=True):
         """
         to be run if game has just ended (king was captured, or no moves left)
+        :param mutation: whether to let game state be mutated
         :return: 1 if white (player 0) won, 0 if draw, -1 if black won
         """
-        last_player = self.last_player_moved()
-        if self.move_history[-1] == END_TURN:
+        if mutation:
+            game = self
+        else:
+            game = self.clone()
+
+        last_player = game.last_player_moved()
+        if game.move_history[-1] == END_TURN:
             last_player = 1 - last_player  # last player is the next player, as the last player that moved ended turn
             last_turn = ()
         else:
-            _, last_turn = self.undo_turn()
+            _, last_turn = game.undo_turn()
 
-        no_moves_left = self.no_moves(player=last_player)  # if the last player had remaining moves
+        no_moves_left = game.no_moves(player=last_player)  # if the last player had remaining moves
 
         king_captured = KING in {piece_id(captured) for _, captured in last_turn}
         if king_captured:
@@ -1259,14 +1277,14 @@ class Chess5d:
             #   otherwise, a draw
 
             # opponent=1-last_player
-            opponent, previous_turn = self.undo_turn()
-            if self.player_in_check(player=opponent):
+            opponent, previous_turn = game.undo_turn()
+            if game.player_in_check(player=opponent):
                 # loss for opponent, win for last player
                 # if last player was white (0), this is a 1
                 # otherwise 0
                 return 1 - 2*last_player
             else:
-                if self.is_checkmate_or_stalemate(player=opponent):
+                if game.is_checkmate_or_stalemate(player=opponent):
                     # opponent was not in check, and all moves led to check, so this is stalemate
                     return 0
                 else:
@@ -1278,9 +1296,9 @@ class Chess5d:
             # here the king was not captured, so last player must have had no moves left
             # either a loss for last player (there was a valid turn that doesnt lead to check)
             # or a draw (all valid turns lead to check)
-            if self.is_checkmate_or_stalemate(player=last_player):
+            if game.is_checkmate_or_stalemate(player=last_player):
                 # there are no valid moves to get out of check
-                if self.player_in_check(player=last_player):
+                if game.player_in_check(player=last_player):
                     # if last player was in check at the start of their turn, this is a loss (checkmate)
                     return 2*last_player - 1
                 else:
@@ -1446,6 +1464,14 @@ class Chess2d(Chess5d):
             if end_idx[:2] == idx[:2]:
                 yield end_idx
 
+    def material_draw(self):
+        board = self.get_current_board()
+        for idx in board.all_pieces():
+            piece = board.get_piece(idx)
+            if piece_id(piece=piece) != KING:
+                return False
+        return True
+
     def make_move(self, move):
         """
         only need i,j coords
@@ -1453,16 +1479,30 @@ class Chess2d(Chess5d):
             idx: (i,j)
             end_idx: (i,j)
         """
-        if move is END_TURN:
-            return super().make_move(move)
+        if move == END_TURN:
+            capture, terminal = super().make_move(move)
+            if self.material_draw():
+                return capture, True
+            else:
+                return capture, terminal
         idx, end_idx = move
         if len(idx) == 4:
-            return super().make_move(move)
+            capture, terminal = super().make_move(move)
         else:
             time = self.multiverse.max_length - 1
             dim = 0
             real_move = ((time, dim) + tuple(idx), (time, dim) + tuple(end_idx))
-            return super().make_move(real_move)
+            capture, terminal = super().make_move(real_move)
+        if self.material_draw():
+            return capture, True
+        else:
+            return capture, terminal
+
+    def terminal_eval(self, mutation=True):
+        if self.material_draw():
+            return 0
+        else:
+            return super().terminal_eval(mutation=mutation)
 
     def play(self):
         while True:
@@ -1491,16 +1531,50 @@ class Chess2d(Chess5d):
     def get_current_board(self) -> Board:
         return self.multiverse.get_board((self.multiverse.max_length - 1, 0))
 
+    @staticmethod
+    def get_input_dim():
+        I, J, board_channels = Board.encoding_shape()
+        return board_channels
+
     def encoding_shape(self):
-        return Board.encoding_shape()
+        I, J, board_channels = Board.encoding_shape()
+        return (1, 1, I, J, Chess2d.get_input_dim())
 
     def encoding(self):
-        return self.get_current_board().encoding()
+        encoded = np.zeros(self.encoding_shape())
+        encoded[0, 0, :, :, :] = self.get_current_board().encoding()
+        return encoded
 
     @staticmethod
     def decoding(array):
-        board = Board.decoding(array)
+        board = Board.decoding(array.view(Board.encoding_shape()))
         game = Chess2d(board=board, first_player=board.player)
+        return game
+
+    def compressed(self):
+        """
+        space efficient representation
+        """
+        game = self.clone()
+        while game.move_history:
+            game.undo_move()
+        timeline = game.multiverse.get_timeline(0)
+        end_time = timeline.end_time()
+        first_player = self.player_at(end_time)
+        first_board = timeline.get_board(end_time)
+        return (
+            first_player,
+            copy.deepcopy(self.move_history),
+            first_board.compressed()
+        )
+
+    @staticmethod
+    def decompress(compression):
+        first_player, moves, compressed_board = compression
+        board = Board.decompress(compressed_board)
+        game = Chess2d(board=board, first_player=first_player)
+        for move in moves:
+            game.make_move(move)
         return game
 
     def clone(self):

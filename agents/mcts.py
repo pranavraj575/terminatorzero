@@ -207,7 +207,7 @@ def UCT_search(game: Chess5d, player, num_reads, policy_value_evaluator):
     return root.next_moves[np.argmax(root.get_final_policy())], root
 
 
-def create_pvz_evaluator(policy_value_net):
+def create_pvz_evaluator(policy_value_net, chess2d=False):
     """
     creates a function to evaluate the game for a given player
     :param policy_value_net: (game encoding, moves) -> (policy, value)
@@ -221,6 +221,10 @@ def create_pvz_evaluator(policy_value_net):
         if player == 1:
             # we should flip the game
             game.flip_game()
+        if chess2d:
+            # all moves must be (0,0,i,j) in this case
+            moves = [END_TURN if move == END_TURN else ((0, 0, *move[0][2:]), (0, 0, *move[1][2:]))
+                     for move in moves]
         policy, value = policy_value_net(torch.tensor(game.encoding(), dtype=torch.float).unsqueeze(0),
                                          moves,
                                          )

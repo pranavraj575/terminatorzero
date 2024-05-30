@@ -29,7 +29,7 @@ def game_outcome(player: Agent,
         game = Chess5d()
     player_idx = first_player
 
-    terminal=False
+    terminal = False
     bored = 0
     while not terminal:
         current_player = (player, opponent)[player_idx]
