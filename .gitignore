@@ -3,5 +3,6 @@
 **/__pycache__
 __pycache__
 terminatorzero.egg-info
-/data/test_2d_chess
 /data/save_test
+**/checkpoints
+

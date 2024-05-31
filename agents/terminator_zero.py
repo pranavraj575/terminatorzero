@@ -97,15 +97,17 @@ class TerminatorZero(Agent):
         pickle.dump(self.info, f)
         f.close()
 
-    def save_checkpoint(self, path, epoch):
+    def save_checkpoint(self, path, epoch,save_overall=True):
         folder = os.path.join(path, 'checkpoints', str(epoch))
         if not os.path.exists(folder):
             os.makedirs(folder)
         self.save_all(folder)
+        if save_overall:
+            self.save_all(path)
 
     def loadable(self, path):
         """
-        wheteher a save path is loadable from
+        whether a save path is loadable from
         """
         return (os.path.exists(os.path.join(path, 'info.pkl')) and
                 os.path.exists(os.path.join(path, 'model.pkl')) and
