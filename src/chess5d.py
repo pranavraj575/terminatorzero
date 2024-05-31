@@ -280,7 +280,7 @@ class Timeline:
     def flip_timeline(self):
         self.board_list = [board.flipped_board() for board in self.board_list]
 
-    def get_board(self, real_time: int) -> Board|None:
+    def get_board(self, real_time: int) -> Board | None:
         """
         gets board at time, where time is the 'real' index, relative to 0
         """
@@ -383,7 +383,7 @@ class Multiverse:
                 if timeline is not None:
                     timeline.flip_timeline()
 
-    def get_board(self, td_idx) -> Board|None:
+    def get_board(self, td_idx) -> Board | None:
         time_idx, dim_idx = td_idx
         timeline = self.get_timeline(dim_idx=dim_idx)
         if timeline is None:
@@ -442,7 +442,7 @@ class Multiverse:
         for dim_idx in range(overall_range[0], overall_range[1] + 1):
             yield (self.get_timeline(dim_idx=dim_idx).end_time(), dim_idx)
 
-    def get_timeline(self, dim_idx) -> Timeline|None:
+    def get_timeline(self, dim_idx) -> Timeline | None:
         if dim_idx > 0:
             dim_idx = dim_idx - 1
             if dim_idx < len(self.up_list):
@@ -561,7 +561,12 @@ class Chess5d:
         game.dimension_spawn_history = copy.deepcopy(self.dimension_spawn_history)
         return game
 
-    def _flip_move(self, move):
+    @staticmethod
+    def flip_moves(moves):
+        return [Chess5d._flip_move(move) for move in moves]
+
+    @staticmethod
+    def _flip_move(move):
         if move == END_TURN:
             return move
         ((time1, dim1, i1, j1), (time2, dim2, i2, j2)) = move
@@ -570,8 +575,8 @@ class Chess5d:
     def flip_game(self):
         self.first_player = 1 - self.first_player
         self.multiverse.flip_multiverse()
-        self.move_history = [self._flip_move(move) for move in self.move_history]
-        self.dimension_spawn_history = {((time_idx, -dim_idx), self._flip_move(move)): -dim
+        self.move_history = Chess5d.flip_moves(self.move_history)
+        self.dimension_spawn_history = {((time_idx, -dim_idx), Chess5d._flip_move(move)): -dim
                                         for ((time_idx, dim_idx), move), dim in self.dimension_spawn_history.items()}
 
     def get_active_number(self, dim_range=None):

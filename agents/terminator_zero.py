@@ -2,6 +2,7 @@ import torch
 from torch import nn
 import os, pickle
 import random
+import time as time_module
 
 from src.agent import Agent
 from agents.mcts import UCT_search, create_pvz_evaluator
@@ -97,7 +98,7 @@ class TerminatorZero(Agent):
         pickle.dump(self.info, f)
         f.close()
 
-    def save_checkpoint(self, path, epoch,save_overall=True):
+    def save_checkpoint(self, path, epoch, save_overall=True):
         folder = os.path.join(path, 'checkpoints', str(epoch))
         if not os.path.exists(folder):
             os.makedirs(folder)
@@ -155,23 +156,27 @@ class TerminatorZero(Agent):
               ):
         prev_epochs = self.info['epochs']
         for epoch in range(prev_epochs, total_epochs):
-            print("starting epoch", epoch)
+            start_time = time_module.time()
+            print("EPOCH", epoch)
             if starting_games is None:
                 game, player = None, 0
             else:
                 game, player = random.choice(starting_games)
                 game = game.clone()
-
+                print('\tstarting game:')
+                print('\t' + game.__str__().replace('\n', '\n\t'))
+                print('\tstarting player', game.first_player)
             policy_loss, value_loss = self.epoch(game=game, first_player=player, draw_moves=draw_moves,
                                                  batch_size=batch_size)
             self.info['epochs'] += 1
             self.info['policy loss'].append(policy_loss.item())
             self.info['value loss'].append(value_loss.item())
-            print('(policy,value) loss:', self.info['policy loss'][-1], self.info['value loss'][-1])
+            print('\ttime:', round(time_module.time() - start_time))
+            print('\t(policy,value) loss:', self.info['policy loss'][-1], self.info['value loss'][-1])
             if not self.info['epochs']%ckpt_freq:
-                print('saving checkpoint (do not cancel)')
+                print('\tsaving checkpoint (do not cancel)')
                 self.save_checkpoint(path=save_path, epoch=self.info['epochs'])
-                print('done saving (can now cancel)')
+                print('\tdone saving (can now cancel)')
 
     def epoch(self, game=None, first_player=0, draw_moves=float('inf'), batch_size=128) -> (torch.Tensor, torch.Tensor):
         self.add_training_data(game=game, first_player=first_player, network=self.network, draw_moves=draw_moves)
@@ -243,13 +248,16 @@ class TerminatorZero(Agent):
             if bored >= draw_moves:
                 early_termination = True
                 break
-        print('training game:')
-        print(game.multiverse)
+        print('\ttraining game:')
+        # print(game.multiverse)
+        print('\t\ttime size:', game.multiverse.max_length - 1)
+        print('\t\tdim range:', game.multiverse.get_range())
         if early_termination:
             result = 0
         else:
             result = game.terminal_eval()
-        print('result:', result)
+        print('\t\tresult:', result)
+
         for compressed_game, player, policy, value in data:
             value = (1 - 2*player)*result  # if player==0, use result, else use -result
             self.buffer.push(*self.get_tuple(compressed_game=compressed_game,

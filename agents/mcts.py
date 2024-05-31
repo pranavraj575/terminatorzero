@@ -221,6 +221,8 @@ def create_pvz_evaluator(policy_value_net, chess2d=False):
         if player == 1:
             # we should flip the game
             game.flip_game()
+            # this is also necessary
+            moves = Chess5d.flip_moves(moves)
         if chess2d:
             # all moves must be (0,0,i,j) in this case
             moves = [END_TURN if move == END_TURN else ((0, 0, *move[0][2:]), (0, 0, *move[1][2:]))

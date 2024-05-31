@@ -133,7 +133,7 @@ class ConvolutedArchitect(AlphaPairwiseCollapseArchitect):
             kernel = (3, 3, 3, 3)
 
         if positional_encoding_nums is None:
-            positional_encoding_nums = (8, 8, 3, 3)
+            positional_encoding_nums = (10, 10, 3, 3)
         self.pos_enc = PositionalEncodingLayer(encoding_nums=positional_encoding_nums)
         self.perm1 = TransToCisPerm()
 
