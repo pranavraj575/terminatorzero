@@ -9,6 +9,7 @@ from networks.permute import TransToCisPerm, CisToTransPerm
 from networks.convNd import ConvBlock, ResBlock
 from networks.policy_value_net import PairwisePolicy, CollapsedValue, PolicyValueNet
 from networks.positional_encoding import PositionalEncodingLayer
+from src.chess5d import Chess5d, END_TURN
 
 
 class AlphaArchitecture(nn.Module):
@@ -372,9 +373,23 @@ class ConvolutedTransArchitect(AlphaPairwiseCollapseArchitect):
         return self.output(X, moves)
 
 
-if __name__ == '__main__':
-    from src.chess5d import Chess5d
+def evaluate_network(network: AlphaArchitecture, game, player, moves, chess2d=False):
+    if player == 1:
+        game.flip_game()
+        moves = Chess5d.flip_moves(moves)
 
+    if chess2d:
+        # all moves must be (0,0,i,j) in this case
+        moves = [END_TURN if move == END_TURN else ((0, 0, *move[0][2:]), (0, 0, *move[1][2:]))
+                 for move in moves]
+    encoding = torch.tensor(game.encoding(), dtype=torch.float).unsqueeze(0)
+    policy, value = network.forward(encoding, moves=moves)
+    if player == 1:
+        game.flip_game()
+    return policy, value
+
+
+if __name__ == '__main__':
     moves = [
         ((0, 0, 1, 3), (0, 0, 3, 3)),
         ((1, 0, 6, 4), (1, 0, 4, 4)),

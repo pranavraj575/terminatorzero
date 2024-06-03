@@ -7,7 +7,8 @@ import time as time_module
 from src.agent import Agent
 from agents.mcts import UCT_search, create_pvz_evaluator
 from src.chess5d import Chess5d, Chess2d, EMPTY, KING, piece_id, END_TURN
-from networks.architectures import AlphaArchitecture, TransArchitect, ConvolutedArchitect, ConvolutedTransArchitect
+from networks.architectures import AlphaArchitecture, TransArchitect, ConvolutedArchitect, ConvolutedTransArchitect, \
+    evaluate_network
 from agents.replay_buffer import ReplayBuffer
 
 
@@ -46,7 +47,19 @@ class TerminatorZero(Agent):
         }
 
     def pick_move(self, game: Chess5d, player):
-        pass
+        moves = list(game.all_possible_moves(player=player))
+        policy, value = evaluate_network(network=self.network,
+                                         game=game,
+                                         player=player,
+                                         moves=moves,
+                                         chess2d=self.chess2d)
+
+        best_move, root = UCT_search(game=game,
+                                     player=player,
+                                     num_reads=self.training_num_reads,
+                                     policy_value_evaluator=create_pvz_evaluator(self.network, chess2d=self.chess2d),
+                                     )
+        return best_move
 
     def get_losses(self, game: Chess5d,
                    player,
@@ -58,16 +71,13 @@ class TerminatorZero(Agent):
         :param policy_smoothing: add small amount to policy to avoid log(0)
         """
         moves = list(game.all_possible_moves(player=player))
-        if player == 1:
-            game.flip_game()
-        if self.chess2d:
-            # all moves must be (0,0,i,j) in this case
-            moves = [END_TURN if move == END_TURN else ((0, 0, *move[0][2:]), (0, 0, *move[1][2:]))
-                     for move in moves]
-        encoding = torch.tensor(game.encoding(), dtype=torch.float).unsqueeze(0)
-        policy, value = self.network.forward(encoding, moves=moves)
-        if player == 1:
-            game.flip_game()
+        policy, value = evaluate_network(network=self.network,
+                                         game=game,
+                                         player=player,
+                                         moves=moves,
+                                         chess2d=self.chess2d,
+                                         )
+
         # crossentropy loss
         # annoying to use torch.nn.CrossEntropyLoss since it assumes the output is pre softmax
         # so, just implement it manually like this

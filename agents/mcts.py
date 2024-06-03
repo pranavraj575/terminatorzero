@@ -3,6 +3,7 @@ from src.chess5d import Chess5d, END_TURN, KING, EMPTY, piece_id
 import numpy as np
 from src.agent import Agent, game_outcome
 from agents.non_learning import Randy
+from networks.architectures import evaluate_network
 
 DUMMY_MOVE = None
 
@@ -218,17 +219,11 @@ def create_pvz_evaluator(policy_value_net, chess2d=False):
     """
 
     def pvz(game: Chess5d, player, moves):
-        if player == 1:
-            # we should flip the game
-            game.flip_game()
-            # this is also necessary
-            moves = Chess5d.flip_moves(moves)
-        if chess2d:
-            # all moves must be (0,0,i,j) in this case
-            moves = [END_TURN if move == END_TURN else ((0, 0, *move[0][2:]), (0, 0, *move[1][2:]))
-                     for move in moves]
-        policy, value = policy_value_net(torch.tensor(game.encoding(), dtype=torch.float).unsqueeze(0),
-                                         moves,
+        policy, value = evaluate_network(network=policy_value_net,
+                                         game=game,
+                                         player=player,
+                                         moves=moves,
+                                         chess2d=chess2d,
                                          )
         return policy.flatten().detach().numpy(), value.flatten().detach().item()
 

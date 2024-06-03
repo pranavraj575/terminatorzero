@@ -26,6 +26,7 @@ NUM_PIECES = len(USING_PIECES)
 BOARD_SIZE = 8
 
 END_TURN = 'END_TURN'
+PASS_TURN = 'PASS_TURN'
 
 
 def piece_id(piece):
@@ -550,6 +551,7 @@ class Chess5d:
         self.first_player = first_player
         self.move_history = []
         self.dimension_spawn_history = dict()
+        self.passed_boards = []
 
     def clone(self):
         game = Chess5d(initial_multiverse=self.multiverse.clone(),
@@ -1196,21 +1198,56 @@ class Chess5d:
                     continue
                 yield end_idx
 
-    def player_in_check(self, player=None):
+    def pass_all_present_boards(self):
         """
-        returns if player is in check
-            if player is None, uses currnet player
+        does a PASS_TURN on all present boards
+        """
+        present = self.present()
 
-        this simply iterates over all opponent attacked squares and returns if any of them are a king
+        for td_idx in self.boards_with_possible_moves():
+            time, dim = td_idx
+            if time == present and self.dim_is_active(dim=dim):
+                self.add_board_child(td_idx=td_idx, board=self.get_board(td_idx), move=PASS_TURN)
+                self.passed_boards.append((time + 1, dim))
+
+    def undo_passed_boards(self):
+        """
+        undoes all the PASS_TURNs
+        """
+        for time, dim in self.passed_boards:
+            self.multiverse.remove_board(dim)
+        self.passed_boards = []
+
+    def current_player_in_check(self, player=None):
+        """
+        returns if current player is in check
+
+        first, the current player must 'pass' on all present boards
+
+        then, this iterates over all opponent attacked squares and returns if any of them are a king
             this is consistent with the definition of check, as a capture of ANY opponent king is a win
         """
-        if player is None:
-            player = self.player_at(self.present())
-
-        for idx in self.attacked_squares(player=1 - player):
+        current_player = self.player_at(self.present())
+        if player is not None and current_player != player:
+            raise Exception("CHECKING CHECK CALLED ON PLAYER WHOSE TURN IT IS NOT")
+        self.pass_all_present_boards()
+        for idx in self.attacked_squares(player=1 - current_player):
             if piece_id(self.get_piece(idx=idx)) == KING:
                 # if player_of(self.get_piece(idx=idx))==player
                 # this check is unnecessary, as opponent cannot move on top of their own king
+                self.undo_passed_boards()
+                return True
+        self.undo_passed_boards()
+        return False
+
+    def current_player_can_win(self):
+        """
+        returns if current player can win
+            i.e. if a king is capturable by the current player on the next move
+        """
+        current_player = self.player_at(self.present())
+        for idx in self.attacked_squares(player=current_player):
+            if piece_id(self.get_piece(idx=idx)) == KING:
                 return True
         return False
 
@@ -1231,18 +1268,18 @@ class Chess5d:
             # for moves in itertools.permutations(moveset):
             for moves in (moveset,):  # incorrect technically, for correctness use earlier line
                 temp_game = self.clone()
-                done = False
+                failed = False
                 for move in moves:
                     # if we are permuting, it is possible the permutation is invalid. in this case, we do not need to
                     # inspect if the player is in check
                     if temp_game.board_can_be_moved(move[0][:2]):
                         temp_game.make_move(move)
                     else:
-                        done = True
+                        failed = True
                         break
-                if done:
+                if failed:
                     break
-                if not temp_game.player_in_check(player=player):
+                if not temp_game.current_player_can_win():
                     # then there exists a sequence of moves that keeps the player out of check
                     return False
         return True
@@ -1283,7 +1320,7 @@ class Chess5d:
 
             # opponent=1-last_player
             opponent, previous_turn = game.undo_turn()
-            if game.player_in_check(player=opponent):
+            if game.current_player_in_check():
                 # loss for opponent, win for last player
                 # if last player was white (0), this is a 1
                 # otherwise 0
@@ -1303,7 +1340,7 @@ class Chess5d:
             # or a draw (all valid turns lead to check)
             if game.is_checkmate_or_stalemate(player=last_player):
                 # there are no valid moves to get out of check
-                if game.player_in_check(player=last_player):
+                if game.current_player_in_check():
                     # if last player was in check at the start of their turn, this is a loss (checkmate)
                     return 2*last_player - 1
                 else:

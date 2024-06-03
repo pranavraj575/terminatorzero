@@ -73,5 +73,17 @@ if __name__ == '__main__':
     if agent.load_last_checkpoint(path=save_dir):
         epochs = agent.info['epochs']
         print("loaded checkpoint with", epochs, "epochs from", save_dir)
+    if False:
+        from agents.human import Human
+        from src.agent import game_outcome
 
+        game, first_player = starting_games[2]
+        outcome, _ = game_outcome(Human(), agent, game=game, first_player=first_player)
+        if outcome == 0:
+            print('draw')
+        elif outcome == 1:
+            print('you won')
+        else:
+            print('you lost')
+        quit()
     agent.train(total_epochs=1000, save_path=save_dir, starting_games=starting_games, draw_moves=200, ckpt_freq=10)

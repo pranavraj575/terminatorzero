@@ -26,7 +26,7 @@ def game_outcome(player: Agent,
     :return: (outcome, resulting game)
     """
     if game is None:
-        game = Chess5d()
+        game = Chess5d(first_player=first_player)
     player_idx = first_player
 
     terminal = False
