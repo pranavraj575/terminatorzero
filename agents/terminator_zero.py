@@ -53,6 +53,7 @@ class TerminatorZero(Agent):
                                          player=player,
                                          moves=moves,
                                          chess2d=self.chess2d)
+        # return moves[torch.argmax(policy.flatten())]
 
         best_move, root = UCT_search(game=game,
                                      player=player,

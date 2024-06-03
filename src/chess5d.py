@@ -619,7 +619,8 @@ class Chess5d:
                 raise Exception("WARNING INVALID MOVE: " + str(idx) + ' -> ' + str(end_idx))
         time1, dim1, i1, j1 = idx
 
-        if self.move_history and self.last_player_moved() != self.player_at(time=time1):
+        if self.move_history and self.move_history[-1] != END_TURN and self.last_player_moved() != self.player_at(
+                time=time1):
             # the previous player did not end their turn, so we can just do it here instead
             self.make_move(END_TURN)
         if not self.move_history and self.first_player != self.player_at(time=time1):
@@ -773,7 +774,7 @@ class Chess5d:
 
         self.multiverse.add_board((time + 1, new_dim), board)
 
-        if self.save_moves:
+        if self.save_moves and move != PASS_TURN:
             self.dimension_spawn_history[(td_idx, move)] = new_dim
 
     def board_can_be_moved(self, td_idx):
@@ -1508,6 +1509,9 @@ class Chess2d(Chess5d):
 
     def material_draw(self):
         board = self.get_current_board()
+        if self.current_player_in_check():
+            # then it is not a draw
+            return False
         for idx in board.all_pieces():
             piece = board.get_piece(idx)
             if piece_id(piece=piece) != KING:

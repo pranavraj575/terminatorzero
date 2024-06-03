@@ -75,15 +75,17 @@ if __name__ == '__main__':
         print("loaded checkpoint with", epochs, "epochs from", save_dir)
     if False:
         from agents.human import Human
+        from agents.non_learning import Randy
         from src.agent import game_outcome
 
-        game, first_player = starting_games[2]
-        outcome, _ = game_outcome(Human(), agent, game=game, first_player=first_player)
+        game, first_player = starting_games[3]
+        outcome, game = game_outcome(Randy(), agent, game=game, first_player=first_player)
         if outcome == 0:
             print('draw')
         elif outcome == 1:
             print('you won')
         else:
             print('you lost')
+        print(game.move_history)
         quit()
     agent.train(total_epochs=1000, save_path=save_dir, starting_games=starting_games, draw_moves=200, ckpt_freq=10)
