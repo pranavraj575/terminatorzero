@@ -5,6 +5,7 @@ tested with python3.11.5 on Ubuntu 20.04
 
 
 ## Installation 
+* Install [Miniconda](https://docs.anaconda.com/free/miniconda/)
 * clone this directiory with ```git clone https://github.com/pranavraj575/terminatorzero```
 * cd into this directory ```cd terminatorzero```
 * setup environment ```conda env create -f environment.yml```
