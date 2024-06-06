@@ -78,8 +78,8 @@ if __name__ == '__main__':
         from agents.non_learning import Randy
         from src.agent import game_outcome
 
-        game, first_player = starting_games[3]
-        outcome, game = game_outcome(Randy(), agent, game=game, first_player=first_player)
+        game, first_player = starting_games[2]
+        outcome, game = game_outcome(Human(), agent, game=game, first_player=first_player)
         if outcome == 0:
             print('draw')
         elif outcome == 1:

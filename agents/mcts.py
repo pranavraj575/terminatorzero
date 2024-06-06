@@ -51,6 +51,7 @@ class Node:
         self.children = {}
         self.captured = piece_id(capture)
         self.dumb = False  # not a dummy node
+        self.value_estimate = None
 
         if next_moves is None:
             next_moves = list(temp_game.all_possible_moves(player=player))
@@ -85,10 +86,9 @@ class Node:
             return self.next_moves[max(self.unexplored_indices(), key=lambda idx: self.child_priors[idx])]
 
     def get_final_policy(self):
-        return torch.nn.Softmax(-1)(torch.tensor(self.child_Q())).flatten().detach().numpy()
-        # Alphazero usesuse child number visits because apparently this is less prone to outliers
+        # return torch.nn.Softmax(-1)(torch.tensor(self.child_Q())).flatten().detach().numpy()
+        # Alphazero uses child number visits because apparently this is less prone to outliers
         return self.child_number_visits/np.sum(self.child_number_visits)
-        # return torch.nn.Softmax()(self.child_Q())
 
     def select_leaf(self, game: Chess5d):
         """
@@ -169,6 +169,7 @@ class Node:
             # the intended value estimate is the parent's estimate of all children
             # thus, we need to flip in this case, as the parent will get the opposite value of the child
             value_estimate = -value_estimate
+        self.value_estimate = value_estimate
         self.inc_total_value_and_visits(value_estimate=value_estimate)
         if not self.parent.dumb:
             self.parent.backup(value_estimate=value_estimate)

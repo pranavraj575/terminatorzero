@@ -44,6 +44,7 @@ class TerminatorZero(Agent):
             'epochs': 0,
             'policy loss': [],
             'value loss': [],
+            'seed': 69,
         }
 
     def pick_move(self, game: Chess5d, player):
@@ -105,6 +106,7 @@ class TerminatorZero(Agent):
 
         self.buffer.save(os.path.join(path, 'buffer.pkl'))
         torch.save(self.network.state_dict(), os.path.join(path, 'model.pkl'), _use_new_zipfile_serialization=False)
+        torch.save(self.optimizer.state_dict(), os.path.join(path, 'optimizer.pkl'), _use_new_zipfile_serialization=False)
         f = open(os.path.join(path, 'info.pkl'), 'wb')
         pickle.dump(self.info, f)
         f.close()
@@ -123,6 +125,7 @@ class TerminatorZero(Agent):
         """
         return (os.path.exists(os.path.join(path, 'info.pkl')) and
                 os.path.exists(os.path.join(path, 'model.pkl')) and
+                os.path.exists(os.path.join(path, 'optimizer.pkl')) and
                 os.path.exists(os.path.join(path, 'buffer.pkl'))
                 )
 
@@ -132,6 +135,7 @@ class TerminatorZero(Agent):
         """
         self.buffer.load(os.path.join(path, 'buffer.pkl'))
         self.network.load_state_dict(torch.load(os.path.join(path, 'model.pkl')))
+        self.optimizer.load_state_dict(torch.load(os.path.join(path, 'optimizer.pkl')))
         f = open(os.path.join(path, 'info.pkl'), 'rb')
         self.info = pickle.load(f)
         f.close()
@@ -235,6 +239,7 @@ class TerminatorZero(Agent):
         if game.no_moves(player=player):
             print("WARNING: training on game that starts with no possible moves")
             return
+        first_value = None
         while not terminal:
             num_reads = self.training_num_reads + len(list(game.all_possible_moves(player=player)))
             best_move, root = UCT_search(game=game,
@@ -242,6 +247,8 @@ class TerminatorZero(Agent):
                                          num_reads=num_reads,
                                          policy_value_evaluator=create_pvz_evaluator(network, chess2d=self.chess2d),
                                          )
+            if first_value is None:
+                first_value = root.value_estimate
             policy = root.get_final_policy()
             # value=max(root.child_Q())
             value = 0
@@ -260,6 +267,12 @@ class TerminatorZero(Agent):
                 early_termination = True
                 break
         print('\ttraining game:')
+        if self.chess2d:
+            print('\t\tfinal state:\n')
+            print('\t\t' + game.__str__().replace('\n', '\n\t\t'))
+        print('\t\tvalue estimate:')
+        print('\t\t' + str(first_value))
+
         # print(game.multiverse)
         print('\t\ttime size:', game.multiverse.max_length - 1)
         print('\t\tdim range:', game.multiverse.get_range())
