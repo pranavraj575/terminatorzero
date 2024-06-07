@@ -422,14 +422,15 @@ if __name__ == '__main__':
 
     alpha = TransArchitect(
         input_dim=encoding.shape[-1],
-        embedding_dim=32,
-        num_decoders=2,
+        embedding_dim=256,
+        num_decoders=5,
         n_heads=3,
     )
+    """
     alpha = ConvolutedArchitect(
         input_dim=encoding.shape[-1],
         embedding_dim=256,
-        num_residuals=32,
+        num_residuals=5,
     )
     alpha = ConvolutedTransArchitect(
         input_dim=encoding.shape[-1],
@@ -437,5 +438,51 @@ if __name__ == '__main__':
         num_blocks=2,
         trans_n_heads=3
     )
+    """
     print(game)
     print(alpha.forward(encoding, game.all_possible_moves(1)))
+
+    from src.chess5d import BOARD_SIZE, Board, EMPTY, as_player, KING, QUEEN
+
+    left = (BOARD_SIZE - 2)//2
+    board = Board(pieces=[[EMPTY for _ in range(left)] +
+                          [as_player(KING, 0), as_player(QUEEN, 0)] +
+                          [EMPTY for _ in range(BOARD_SIZE - 2 - left)]] +
+                         [[EMPTY for _ in range(BOARD_SIZE)] for _ in range(BOARD_SIZE - 2)] +
+                         [[EMPTY for _ in range(left)] +
+                          [as_player(KING, 1)] +
+                          [EMPTY for _ in range(BOARD_SIZE - 1 - left)]]
+                  )
+    test_games = []
+    test_games.append((Chess5d(initial_board=board.clone()), 9))
+    board = board.flipped_board()
+    test_games.append((Chess5d(initial_board=board.clone()), -9))
+    board.set_player(1 - board.player)
+    test_games.append((Chess5d(initial_board=board.clone()), -8))
+    board = board.flipped_board()
+    test_games.append((Chess5d(initial_board=board.clone()), 8))
+
+    inputs = [torch.tensor(game.encoding(), dtype=torch.float).unsqueeze(0) for game, value in test_games]
+    optim = torch.optim.Adam(alpha.parameters(), )
+    losses = []
+    for epoch in range(1000):
+        optim.zero_grad()
+        disp = not epoch%5
+        loss = torch.zeros(1)
+        for enc, (game, value) in zip(inputs, test_games):
+            _, guess_val = alpha.forward(enc, moves=[])
+            if disp:
+                print('value', value, 'guess', guess_val)
+            loss += torch.square(value - guess_val.flatten())
+        loss = loss
+        loss.backward()
+        losses.append(loss.item())
+        optim.step()
+        if disp:
+            print('loss', loss)
+            print('epoch', epoch, 'done')
+            print()
+    from matplotlib import pyplot as plt
+
+    plt.plot(losses)
+    plt.show()
