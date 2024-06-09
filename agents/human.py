@@ -51,11 +51,10 @@ class Human(Agent):
 if __name__ == '__main__':
     from src.agent import game_outcome
     from agents.non_learning import Randy
-    import random
 
     game = Chess5d(check_validity=True)
 
-    outcome, _ = game_outcome(Human(), Randy(), first_player=random.randint(0, 1))
+    outcome, _ = game_outcome(Human(), Randy(), game=game)
     if outcome == 0:
         print('draw')
     elif outcome == 1:

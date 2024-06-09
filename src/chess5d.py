@@ -2,6 +2,8 @@ import copy
 import itertools
 import numpy as np
 
+BOARD_SIZE = 5
+
 PAWN = 'p'
 ROOK = 'r'
 KNIGHT = 'n'
@@ -23,7 +25,6 @@ UNMOVED = '*'
 PASSANTABLE = '$'
 
 NUM_PIECES = len(USING_PIECES)
-BOARD_SIZE = 8
 
 END_TURN = 'END_TURN'
 PASS_TURN = 'PASS_TURN'

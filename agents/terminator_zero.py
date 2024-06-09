@@ -106,7 +106,8 @@ class TerminatorZero(Agent):
 
         self.buffer.save(os.path.join(path, 'buffer.pkl'))
         torch.save(self.network.state_dict(), os.path.join(path, 'model.pkl'), _use_new_zipfile_serialization=False)
-        torch.save(self.optimizer.state_dict(), os.path.join(path, 'optimizer.pkl'), _use_new_zipfile_serialization=False)
+        torch.save(self.optimizer.state_dict(), os.path.join(path, 'optimizer.pkl'),
+                   _use_new_zipfile_serialization=False)
         f = open(os.path.join(path, 'info.pkl'), 'wb')
         pickle.dump(self.info, f)
         f.close()
@@ -270,6 +271,7 @@ class TerminatorZero(Agent):
         if self.chess2d:
             print('\t\tfinal state:\n')
             print('\t\t' + game.__str__().replace('\n', '\n\t\t'))
+        print(game.move_history)
         print('\t\tvalue estimate:')
         print('\t\t' + str(first_value))
 

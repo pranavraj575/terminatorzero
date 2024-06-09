@@ -24,8 +24,6 @@ if __name__ == '__main__':
              '_net_architecture_' + architecture +
              '_embedding_dim_' + str(embedding_dim) +
              '_num_blocks_' + str(num_blocks))
-
-    save_dir = os.path.join(DIR, 'data', 'test_2d_chess', ident)
     if architecture == 'cnn':
         ident += '_num_reads_' + str(num_reads)
         network = ConvolutedArchitect(input_dim=Chess2d.get_input_dim(),
@@ -45,6 +43,10 @@ if __name__ == '__main__':
                                  )
     else:
         raise Exception('architecture ' + architecture + ' not valid string')
+
+    if BOARD_SIZE != 8:
+        ident += '_board_size_' + str(BOARD_SIZE)
+
     if game_name == 'queen_checkmate':
         left = (BOARD_SIZE - 2)//2
         board = Board(pieces=[[EMPTY for _ in range(left)] +
@@ -70,9 +72,13 @@ if __name__ == '__main__':
                            training_num_reads=num_reads,
                            chess2d=True,
                            )
+
+    save_dir = os.path.join(DIR, 'data', 'test_2d_chess', ident)
     if agent.load_last_checkpoint(path=save_dir):
         epochs = agent.info['epochs']
         print("loaded checkpoint with", epochs, "epochs from", save_dir)
+    else:
+        print('starting save to:', save_dir)
     if False:
         from agents.human import Human
         from agents.non_learning import Randy
@@ -88,4 +94,4 @@ if __name__ == '__main__':
             print('you lost')
         print(game.move_history)
         quit()
-    agent.train(total_epochs=1000, save_path=save_dir, starting_games=starting_games, draw_moves=200, ckpt_freq=10)
+    agent.train(total_epochs=1000, save_path=save_dir, starting_games=starting_games, draw_moves=200, ckpt_freq=69)
