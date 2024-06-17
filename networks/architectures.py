@@ -4,7 +4,7 @@ full networks that go from encoded game (batch size, D1, ..., input_dim) to (pol
 import torch
 from torch import nn
 
-from networks.transformer import InitialEmbedding, DecoderBlock
+from networks.transformer import InitialEmbedding, DecoderBlock, MultiHeadedAttentionSingleMove
 from networks.permute import TransToCisPerm, CisToTransPerm
 from networks.convNd import ConvBlock, ResBlock
 from networks.policy_value_net import PairwisePolicy, CollapsedValue, PolicyValueNet
@@ -193,6 +193,8 @@ class TransArchitect(AlphaPairwiseCollapseArchitect):
 
                  value_collapse_hidden_layers=None,
                  value_output_hidden_layers=None,
+
+                 AttentionClass=MultiHeadedAttentionSingleMove,
                  ):
         """
         pastes a bunch of decoder blocks together
@@ -248,6 +250,7 @@ class TransArchitect(AlphaPairwiseCollapseArchitect):
                 n_heads=n_heads,
                 drop_prob=drop_prob,
                 hidden_layers=decoder_hidden_layers,
+                AttentionClass=AttentionClass,
             )
             for _ in range(num_decoders)
         ])

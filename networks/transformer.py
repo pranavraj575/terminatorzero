@@ -207,17 +207,18 @@ class MultiHeadedAttentionFull(GeneralAttentionToMultiHead):
 
 
 class DecoderBlock(nn.Module):
-    def __init__(self, embedding_dim: int, n_heads: int, drop_prob: float = .2, hidden_layers=None):
+    def __init__(self, embedding_dim: int, n_heads: int, drop_prob: float = .2, hidden_layers=None,
+                 AttentionClass=MultiHeadedAttentionSingleMove):
         """
         decoder block
         :param hidden_layers: sent to ffn at the end
         """
         super(DecoderBlock, self).__init__()
 
-        self.attention1 = MultiHeadedAttentionSingleMove(n_heads=n_heads,
+        self.attention1 = AttentionClass(n_heads=n_heads,
                                                          in_dim=embedding_dim,
                                                          out_dim=embedding_dim)
-        self.attention2 = MultiHeadedAttentionSingleMove(n_heads=n_heads,
+        self.attention2 = AttentionClass(n_heads=n_heads,
                                                          in_dim=embedding_dim,
                                                          out_dim=embedding_dim)
         self.norm1 = nn.LayerNorm(embedding_dim)

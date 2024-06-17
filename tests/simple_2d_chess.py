@@ -4,6 +4,7 @@ from src.chess5d import Chess2d, Board, KING, QUEEN, BOARD_SIZE, as_player, EMPT
 from src.utilitites import seed_all
 from agents.terminator_zero import TerminatorZero
 from networks.architectures import ConvolutedArchitect, TransArchitect
+from networks.transformer import MultiHeadedAttentionSingleMove, MultiHeadedAttentionFull
 
 if __name__ == '__main__':
     seed_all(2)
@@ -11,11 +12,12 @@ if __name__ == '__main__':
     embedding_dim = 256
     num_blocks = 16
     # cnn
-    num_reads = 100
+    num_reads = 1000
     # trans
     num_heads = 5
     drop_prob = .2
     positional_encoding_nums = (10, 10, 3, 3)
+    attention_type = 'full'
 
     architecture = 'cnn'
     game_name = 'queen_checkmate'
@@ -34,12 +36,20 @@ if __name__ == '__main__':
                                       )
     elif architecture == 'trans':
         ident += '_num_heads_' + str(num_heads)
+        ident += attention_type
+        if attention_type == 'full':
+            Attention = MultiHeadedAttentionFull
+        elif attention_type == 'single_move':
+            Attention = MultiHeadedAttentionSingleMove
+        else:
+            raise Exception(attention_type + ' not recognized')
         network = TransArchitect(input_dim=Chess2d.get_input_dim,
                                  embedding_dim=embedding_dim,
                                  num_decoders=num_blocks,
                                  n_heads=num_heads,
                                  positional_encoding_nums=positional_encoding_nums,
                                  drop_prob=drop_prob,
+                                 AttentionClass=Attention,
                                  )
     else:
         raise Exception('architecture ' + architecture + ' not valid string')
@@ -47,6 +57,7 @@ if __name__ == '__main__':
     if BOARD_SIZE != 8:
         ident += '_board_size_' + str(BOARD_SIZE)
 
+    starting_games = []
     if game_name == 'queen_checkmate':
         left = (BOARD_SIZE - 2)//2
         board = Board(pieces=[[EMPTY for _ in range(left)] +
@@ -57,16 +68,18 @@ if __name__ == '__main__':
                               [as_player(KING, 1)] +
                               [EMPTY for _ in range(BOARD_SIZE - 1 - left)]]
                       )
-        starting_games = []
-        starting_games.append((Chess2d(board=board.clone()), board.player))
-        board = board.flipped_board()
-        starting_games.append((Chess2d(board=board.clone()), board.player))
-        board.set_player(1 - board.player)
-        starting_games.append((Chess2d(board=board.clone()), board.player))
-        board = board.flipped_board()
-        starting_games.append((Chess2d(board=board.clone()), board.player))
+    elif BOARD_SIZE == 5 and game_name == 'small_board':
+        board = Board()
     else:
         raise Exception('game name ' + game_name + ' not valid string')
+
+    starting_games.append((Chess2d(board=board.clone()), board.player))
+    board = board.flipped_board()
+    starting_games.append((Chess2d(board=board.clone()), board.player))
+    board.set_player(1 - board.player)
+    starting_games.append((Chess2d(board=board.clone()), board.player))
+    board = board.flipped_board()
+    starting_games.append((Chess2d(board=board.clone()), board.player))
 
     agent = TerminatorZero(network=network,
                            training_num_reads=num_reads,
@@ -94,4 +107,4 @@ if __name__ == '__main__':
             print('you lost')
         print(game.move_history)
         quit()
-    agent.train(total_epochs=1000, save_path=save_dir, starting_games=starting_games, draw_moves=200, ckpt_freq=69)
+    agent.train(total_epochs=1000, save_path=save_dir, starting_games=starting_games, draw_moves=100, ckpt_freq=5)
