@@ -1,6 +1,6 @@
 import os, sys
 
-from src.chess5d import Chess2d, Board, KING, QUEEN, BOARD_SIZE, as_player, EMPTY
+from src.chess5d import Chess2d, Board, KING, QUEEN, as_player, EMPTY
 from src.utilitites import seed_all
 from agents.terminator_zero import TerminatorZero
 from networks.architectures import ConvolutedArchitect, TransArchitect
@@ -24,7 +24,7 @@ if __name__ == '__main__':
     ident = ('game_' + game_name +
              '_net_architecture_' + architecture +
              '_embedding_dim_' + str(embedding_dim) +
-             '_num_blocks_' + str(num_blocks)+
+             '_num_blocks_' + str(num_blocks) +
              '_num_reads_' + str(num_reads)
              )
     if architecture == 'cnn':
@@ -53,7 +53,7 @@ if __name__ == '__main__':
                                  )
     else:
         raise Exception('architecture ' + architecture + ' not valid string')
-
+    BOARD_SIZE = Board.BOARD_SIZE
     if BOARD_SIZE != 8:
         ident += '_board_size_' + str(BOARD_SIZE)
 

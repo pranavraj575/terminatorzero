@@ -2,7 +2,10 @@ import copy
 import itertools
 import numpy as np
 
-BOARD_SIZE = 5
+
+EMPTY = ' '
+UNMOVED = '*'
+PASSANTABLE = '$'
 
 PAWN = 'p'
 ROOK = 'r'
@@ -19,10 +22,6 @@ BRAWN = 'b'  # beefy pawn, unimplemented (the en brasant and capturing is annoyi
 USING_PIECES = [ROOK, KNIGHT, BISHOP, QUEEN, KING, PAWN]
 
 PROMOTION = QUEEN
-
-EMPTY = ' '
-UNMOVED = '*'
-PASSANTABLE = '$'
 
 NUM_PIECES = len(USING_PIECES)
 
@@ -64,7 +63,7 @@ def get_moved_piece(piece, idx=(-1, None, -1, -1), end_idx=(-1, None, -1, -1)):
     _, _, i2, j2 = end_idx
     piece = piece[0]  # since it moved
     if piece_id(piece) == PAWN and (i1 > -1):
-        if i2 == BOARD_SIZE - 1 or i2 == 0:
+        if i2 == Board.BOARD_SIZE - 1 or i2 == 0:
             piece = as_player(PROMOTION, player_of(piece))
         if abs(i1 - i2) == 2:
             piece = piece + PASSANTABLE
@@ -80,19 +79,20 @@ def en_passantable(piece):
 
 
 class Board:
+    BOARD_SIZE=5
     def __init__(self, pieces=None, player=0):
         self.player = player
         if pieces is None:
-            pieces = [[EMPTY for _ in range(BOARD_SIZE)] for _ in range(BOARD_SIZE)]
-            if BOARD_SIZE == 8:
+            pieces = [[EMPTY for _ in range(Board.BOARD_SIZE)] for _ in range(Board.BOARD_SIZE)]
+            if Board.BOARD_SIZE == 8:
                 back_rank = [ROOK + UNMOVED, KNIGHT, BISHOP, QUEEN, KING + UNMOVED, BISHOP, KNIGHT, ROOK + UNMOVED]
-            elif BOARD_SIZE == 5:
+            elif Board.BOARD_SIZE == 5:
                 back_rank = [ROOK + UNMOVED, KNIGHT, BISHOP, QUEEN, KING + UNMOVED]
             else:
-                raise Exception("NO DEFAULT FOR BOARD SIZE " + str(BOARD_SIZE))
+                raise Exception("NO DEFAULT FOR BOARD SIZE " + str(Board.BOARD_SIZE))
             for i, row in enumerate((
                     back_rank,
-                    [PAWN + UNMOVED for _ in range(BOARD_SIZE)]
+                    [PAWN + UNMOVED for _ in range(Board.BOARD_SIZE)]
             )):
                 pieces[i] = [piece.upper() for piece in row]
                 pieces[len(pieces) - i - 1] = [piece.lower() for piece in row]
@@ -139,8 +139,8 @@ class Board:
         removes the enpassant marker from pieces except for the one indicated by just_moved
         :param just_moved: index
         """
-        for i in range(BOARD_SIZE):
-            for j in range(BOARD_SIZE):
+        for i in range(Board.BOARD_SIZE):
+            for j in range(Board.BOARD_SIZE):
                 if (i, j) != just_moved:
                     self.board[i][j] = remove_passant(self.board[i][j])
 
@@ -173,7 +173,7 @@ class Board:
 
     @staticmethod
     def encoding_shape():
-        return (BOARD_SIZE, BOARD_SIZE, 2*NUM_PIECES + 4)
+        return (Board.BOARD_SIZE, Board.BOARD_SIZE, 2*NUM_PIECES + 4)
 
     @staticmethod
     def blocked_board_encoding():
@@ -199,8 +199,8 @@ class Board:
 
         encoded[:, :, k_0] = self.player
         encoded[:, :, 2*NUM_PIECES + 3] = 1  # unblocked board marker
-        for i in range(BOARD_SIZE):
-            for j in range(BOARD_SIZE):
+        for i in range(Board.BOARD_SIZE):
+            for j in range(Board.BOARD_SIZE):
                 if self.board[i][j] != EMPTY:
                     piece = self.get_piece((i, j))
                     pid = piece_id(piece)
@@ -217,10 +217,10 @@ class Board:
         if Board.is_blocked(encoding):
             return None
 
-        pieces = [[EMPTY for _ in range(BOARD_SIZE)] for _ in range(BOARD_SIZE)]
+        pieces = [[EMPTY for _ in range(Board.BOARD_SIZE)] for _ in range(Board.BOARD_SIZE)]
         k_0 = 2*NUM_PIECES
-        for i in range(BOARD_SIZE):
-            for j in range(BOARD_SIZE):
+        for i in range(Board.BOARD_SIZE):
+            for j in range(Board.BOARD_SIZE):
                 piece = EMPTY
                 for k in range(k_0):
                     if int(encoding[i, j, k]) == 1:
@@ -257,11 +257,10 @@ class Board:
     @staticmethod
     def empty_string():
         s = ''
-        for row in range(2*BOARD_SIZE):
-            s += ' '*(2*BOARD_SIZE + 1)
+        for row in range(2*Board.BOARD_SIZE):
+            s += ' '*(2*Board.BOARD_SIZE + 1)
             s += '\n'
         return s
-
 
 class Timeline:
     def __init__(self, board_list: [Board] = None, start_idx: int = 0):
@@ -335,8 +334,8 @@ class Timeline:
                       for _ in range(self.start_idx)] + [board.__str__()
                                                          for board in self.board_list]
         str_boards = [s.split('\n') for s in str_boards]
-        for row in range(2*BOARD_SIZE):
-            if row == BOARD_SIZE:
+        for row in range(2*Board.BOARD_SIZE):
+            if row == Board.BOARD_SIZE:
                 midstring = ''
                 for time in range(len(str_boards)):
                     midtime = '   t' + str(time) + ': '
@@ -573,7 +572,8 @@ class Chess5d:
         if move == END_TURN:
             return move
         ((time1, dim1, i1, j1), (time2, dim2, i2, j2)) = move
-        return ((time1, -dim1, BOARD_SIZE - 1 - i1, j1), (time2, -dim2, BOARD_SIZE - 1 - i2, j2))
+        return ((time1, -dim1, Board.BOARD_SIZE - 1 - i1, j1),
+                (time2, -dim2, Board.BOARD_SIZE - 1 - i2, j2))
 
     def flip_game(self):
         self.first_player = 1 - self.first_player
@@ -642,7 +642,7 @@ class Chess5d:
                 if movement > 1:
                     # we have castled, move the rook as well
                     dir = np.sign(j2 - j1)
-                    rook_j = 0 if dir == -1 else BOARD_SIZE - 1
+                    rook_j = 0 if dir == -1 else Board.BOARD_SIZE - 1
                     new_board, rook = new_board.remove_piece((i1, rook_j))
                     new_board, _ = new_board.add_piece(rook, (i1, j1 + dir))
             if piece_id(piece) == PAWN:  # check for en passant
@@ -747,7 +747,7 @@ class Chess5d:
 
     def idx_exists(self, td_idx, ij_idx=(0, 0)) -> bool:
         i, j = ij_idx
-        if i < 0 or j < 0 or i >= BOARD_SIZE or j >= BOARD_SIZE:
+        if i < 0 or j < 0 or i >= Board.BOARD_SIZE or j >= Board.BOARD_SIZE:
             return False
         return self.multiverse.idx_exists(td_idx=td_idx)
 
@@ -891,9 +891,9 @@ class Chess5d:
 
         # castling check
         if castling and pid == KING and is_unmoved(piece):
-            # for rook_i in (0, BOARD_SIZE - 1):
+            # for rook_i in (0, Board.BOARD_SIZE - 1):
             rook_i = idx_i  # rook must be on same rank
-            for rook_j in (0, BOARD_SIZE - 1):
+            for rook_j in (0, Board.BOARD_SIZE - 1):
                 # potential rook squares
                 rook_maybe = self.get_piece((idx_time, idx_dim, rook_i, rook_j))
                 if player_of(rook_maybe) == player_of(piece):

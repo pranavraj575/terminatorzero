@@ -1,6 +1,7 @@
-from src.chess5d import END_TURN, Chess2d, EMPTY, as_player, KING, QUEEN, Board, BOARD_SIZE
+from src.chess5d import END_TURN, Chess2d, EMPTY, as_player, KING, QUEEN, Board
 
 if __name__ == '__main__':
+    BOARD_SIZE = Board.BOARD_SIZE
     moves = [((0, 0, 0, 1), (0, 0, 1, 1)), END_TURN, ((1, 0, 4, 2), (1, 0, 4, 4)), END_TURN, ((2, 0, 1, 1), (2, 0
                                                                                                              , 0, 1)),
              END_TURN, ((3, 0, 4, 4), (3, 0, 2, 2)), END_TURN, ((4, 0, 0, 1), (4, 0, 1, 0)), END_TURN,
