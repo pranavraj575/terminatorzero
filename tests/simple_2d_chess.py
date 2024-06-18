@@ -11,9 +11,8 @@ if __name__ == '__main__':
     DIR = os.path.dirname(os.path.dirname(os.path.abspath(sys.argv[0])))
     embedding_dim = 256
     num_blocks = 16
-    # cnn
     num_reads = 1000
-    # trans
+    # trans specific
     num_heads = 5
     drop_prob = .2
     positional_encoding_nums = (10, 10, 3, 3)
@@ -25,9 +24,10 @@ if __name__ == '__main__':
     ident = ('game_' + game_name +
              '_net_architecture_' + architecture +
              '_embedding_dim_' + str(embedding_dim) +
-             '_num_blocks_' + str(num_blocks))
+             '_num_blocks_' + str(num_blocks)+
+             '_num_reads_' + str(num_reads)
+             )
     if architecture == 'cnn':
-        ident += '_num_reads_' + str(num_reads)
         network = ConvolutedArchitect(input_dim=Chess2d.get_input_dim(),
                                       embedding_dim=embedding_dim,
                                       num_residuals=num_blocks,
@@ -36,7 +36,7 @@ if __name__ == '__main__':
                                       )
     elif architecture == 'trans':
         ident += '_num_heads_' + str(num_heads)
-        ident += attention_type
+        ident += '_' + attention_type
         if attention_type == 'full':
             Attention = MultiHeadedAttentionFull
         elif attention_type == 'single_move':
