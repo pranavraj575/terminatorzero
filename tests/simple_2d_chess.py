@@ -19,8 +19,8 @@ if __name__ == '__main__':
     positional_encoding_nums = (10, 10, 3, 3)
     attention_type = 'full'
 
-    architecture = 'cnn'
-    game_name = 'queen_checkmate'
+    architecture = 'trans'
+    game_name = 'small_board'
 
     ident = ('game_' + game_name +
              '_net_architecture_' + architecture +
@@ -43,7 +43,7 @@ if __name__ == '__main__':
             Attention = MultiHeadedAttentionSingleMove
         else:
             raise Exception(attention_type + ' not recognized')
-        network = TransArchitect(input_dim=Chess2d.get_input_dim,
+        network = TransArchitect(input_dim=Chess2d.get_input_dim(),
                                  embedding_dim=embedding_dim,
                                  num_decoders=num_blocks,
                                  n_heads=num_heads,

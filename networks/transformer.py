@@ -104,7 +104,9 @@ class SelfAttentionLayerFull(GeneralAttentionLayer):
         soft_input = torch.bmm(query, key.transpose(1, 2))/(self.cmp_dim**.5)
         att_weights = self.softmax(soft_input)
 
-        return torch.bmm(att_weights, value)
+        # (batch size, D1'*D2'*D3'*D4', out dim)
+        output = torch.bmm(att_weights, value)
+        return output.view((batch_size, *board_size, self.out_dim))
 
 
 class SelfAttentionLayerSingleMove(GeneralAttentionLayer):
@@ -216,11 +218,11 @@ class DecoderBlock(nn.Module):
         super(DecoderBlock, self).__init__()
 
         self.attention1 = AttentionClass(n_heads=n_heads,
-                                                         in_dim=embedding_dim,
-                                                         out_dim=embedding_dim)
+                                         in_dim=embedding_dim,
+                                         out_dim=embedding_dim)
         self.attention2 = AttentionClass(n_heads=n_heads,
-                                                         in_dim=embedding_dim,
-                                                         out_dim=embedding_dim)
+                                         in_dim=embedding_dim,
+                                         out_dim=embedding_dim)
         self.norm1 = nn.LayerNorm(embedding_dim)
         self.norm2 = nn.LayerNorm(embedding_dim)
         self.norm3 = nn.LayerNorm(embedding_dim)
