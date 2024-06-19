@@ -10,6 +10,6 @@ tested with python3.11.5 on Ubuntu 20.04
 * cd into this directory ```cd terminatorzero```
 * setup environment ```conda env create -f environment.yml```
 * activate environment ```conda activate terminator```
-* install required packages ```pip3 install -e .```
+* install repository ```pip3 install -e .```
 
 Note that ```conda activate terminator``` must be run on every terminal
