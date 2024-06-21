@@ -19,7 +19,7 @@ if __name__ == '__main__':
     attention_type = 'full'
 
     architecture = 'trans'
-    game_name = 'small_board'
+    game_name = 'queen_checkmate'
 
     ident = ('game_' + game_name +
              '_net_architecture_' + architecture +
