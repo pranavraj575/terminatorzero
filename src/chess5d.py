@@ -79,7 +79,7 @@ def en_passantable(piece):
 
 
 class Board:
-    BOARD_SIZE=5
+    BOARD_SIZE=8
     def __init__(self, pieces=None, player=0):
         self.player = player
         if pieces is None:

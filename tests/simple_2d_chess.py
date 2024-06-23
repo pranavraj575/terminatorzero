@@ -10,7 +10,7 @@ if __name__ == '__main__':
     seed_all(2)
     DIR = os.path.dirname(os.path.dirname(os.path.abspath(sys.argv[0])))
     embedding_dim = 256
-    num_blocks = 16
+    num_blocks = 18
     num_reads = 1000
     # trans specific
     num_heads = 5
@@ -19,7 +19,7 @@ if __name__ == '__main__':
     attention_type = 'full'
 
     architecture = 'trans'
-    game_name = 'queen_checkmate'
+    game_name = 'normal_game'
 
     ident = ('game_' + game_name +
              '_net_architecture_' + architecture +
@@ -36,7 +36,7 @@ if __name__ == '__main__':
                                       )
     elif architecture == 'trans':
         ident += '_num_heads_' + str(num_heads)
-        ident += '_' + attention_type
+        ident += '_attention_' + attention_type
         if attention_type == 'full':
             Attention = MultiHeadedAttentionFull
         elif attention_type == 'single_move':
@@ -68,7 +68,7 @@ if __name__ == '__main__':
                               [as_player(KING, 1)] +
                               [EMPTY for _ in range(BOARD_SIZE - 1 - left)]]
                       )
-    elif BOARD_SIZE == 5 and game_name == 'small_board':
+    elif game_name == 'normal_game':
         board = Board()
     else:
         raise Exception('game name ' + game_name + ' not valid string')
