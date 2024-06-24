@@ -11,7 +11,7 @@ if __name__ == '__main__':
     DIR = os.path.dirname(os.path.dirname(os.path.abspath(sys.argv[0])))
     embedding_dim = 256
     num_blocks = 18
-    num_reads = 1000
+    num_reads = 2000
     # trans specific
     num_heads = 5
     drop_prob = .2

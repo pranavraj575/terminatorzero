@@ -2,7 +2,6 @@ import copy
 import itertools
 import numpy as np
 
-
 EMPTY = ' '
 UNMOVED = '*'
 PASSANTABLE = '$'
@@ -79,7 +78,8 @@ def en_passantable(piece):
 
 
 class Board:
-    BOARD_SIZE=8
+    BOARD_SIZE = 8
+
     def __init__(self, pieces=None, player=0):
         self.player = player
         if pieces is None:
@@ -261,6 +261,7 @@ class Board:
             s += ' '*(2*Board.BOARD_SIZE + 1)
             s += '\n'
         return s
+
 
 class Timeline:
     def __init__(self, board_list: [Board] = None, start_idx: int = 0):

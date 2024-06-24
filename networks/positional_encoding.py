@@ -9,7 +9,8 @@ class PositionalEncodingLayer(nn.Module):
         self.encoding_nums = encoding_nums
 
     def additional_output(self) -> int:
-        return 2*sum(self.encoding_nums)
+        # encodes with sin, cos, and also does normal indices and reverse indices
+        return 4*sum(self.encoding_nums)
 
     def forward(self, X: torch.Tensor) -> torch.Tensor:
         """
@@ -19,7 +20,6 @@ class PositionalEncodingLayer(nn.Module):
         """
         # board_shape=(D1, D2, ...)
         batch_size, *board_shape, initial_dim = X.shape
-
         for dimension, encoding_num in enumerate(self.encoding_nums):
 
             append_shape = list(X.shape)
@@ -27,35 +27,38 @@ class PositionalEncodingLayer(nn.Module):
             # shape is (batch_size, D1, D2, ..., additional size)
 
             sequence_length = board_shape[dimension]
+            for backwards in True, False:
 
-            # size (sequence length)
-            count = torch.arange(0, sequence_length)
+                # size (sequence length)
+                count = torch.arange(0, sequence_length)
+                if backwards:
+                    count = count - sequence_length + 1
 
-            # size (num encodings)
-            # frequencies=1/torch.pow(10000,torch.arange(0,self.num_encodings)/self.num_encodings)
-            frequencies = 1/torch.pow(2, torch.arange(1, encoding_num + 1))
+                # size (num encodings)
+                # frequencies=1/torch.pow(10000,torch.arange(0,self.num_encodings)/self.num_encodings)
+                frequencies = 1/torch.pow(2, torch.arange(1, encoding_num + 1))
 
-            # size (sequence length, num encodings)
-            inputs = count.view((-1, 1))*(2*torch.pi*frequencies)
+                # size (sequence length, num encodings)
+                inputs = count.view((-1, 1))*(2*torch.pi*frequencies)
 
-            # size (sequence length, 2 * num encodings)
-            P = torch.cat((torch.sin(inputs), torch.cos(inputs)), dim=-1)
+                # size (sequence length, 2 * num encodings)
+                P = torch.cat((torch.sin(inputs), torch.cos(inputs)), dim=-1)
 
-            # size (1, sequence length, 2 * num encodings)
-            P = P.view((1, *P.shape))
+                # size (1, sequence length, 2 * num encodings)
+                P = P.view((1, *P.shape))
 
-            for _ in range(dimension):
-                P = P.view(P.shape[0], 1, *P.shape[1:])
-            # size (1 (this is the 'batch size' dimension), 1, ..., 1, sequence length, 2 * num encodings)
+                for _ in range(dimension):
+                    P = P.view(P.shape[0], 1, *P.shape[1:])
+                # size (1 (this is the 'batch size' dimension), 1, ..., 1, sequence length, 2 * num encodings)
 
-            # where sequence_length is in the correct dimension that we are looking at
+                # where sequence_length is in the correct dimension that we are looking at
 
-            while len(P.shape) < len(append_shape):
-                P = P.view(*P.shape[:-1], 1, P.shape[-1])
-            # size (1, 1, ..., 1, sequence length, 1, ..., 2 * num encodings)
+                while len(P.shape) < len(append_shape):
+                    P = P.view(*P.shape[:-1], 1, P.shape[-1])
+                # size (1, 1, ..., 1, sequence length, 1, ..., 2 * num encodings)
 
-            X = torch.cat((X, P + torch.zeros(append_shape)), dim=-1)
-            # size (batch_size, D1, D2, ..., X.shape[-1]+2*num encodings)
+                X = torch.cat((X, P + torch.zeros(append_shape)), dim=-1)
+                # size (batch_size, D1, D2, ..., X.shape[-1]+2*num encodings)
 
         return X
 
@@ -86,3 +89,7 @@ if __name__ == '__main__':
                                    encoding.shape[-1] + 2*encoding_nums[0] + 2*encoding_nums[1]])
         sample = torch.round(sample, decimals=2)
         print(sample)
+    simple_test = torch.arange(10).view((1, -1, 1))
+    pos_enc = PositionalEncodingLayer(encoding_nums=(2,))
+    print(torch.round(pos_enc.forward(simple_test).view((-1, 1 + pos_enc.additional_output())),
+                      decimals=2))
